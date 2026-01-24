@@ -9,7 +9,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('prompt_service', '0002_promptversion_fields'),
+        ('prompt_service', '0003_prompt_revert_and_drop_version'),
         ('history_service', '0001_initial'),
     ]
 
@@ -40,13 +40,13 @@ class Migration(migrations.Migration):
         ),
         migrations.AddField(
             model_name='turn',
-            name='prompt_version',
+            name='prompt',
             field=models.ForeignKey(
                 blank=True,
                 null=True,
                 on_delete=django.db.models.deletion.SET_NULL,
                 related_name='turns',
-                to='prompt_service.promptversion',
+                to='prompt_service.prompt',
             ),
         ),
     ]
