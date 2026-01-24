@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'apps.llm_service',
     'apps.prompt_service',
     'apps.history_service',
+    'apps.ratings_service',
 ]
 
 MIDDLEWARE = [

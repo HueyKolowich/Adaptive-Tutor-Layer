@@ -1,0 +1,1 @@
+# Ratings service package

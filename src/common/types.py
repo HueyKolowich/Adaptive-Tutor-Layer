@@ -10,7 +10,6 @@ class PromptContext:
 @dataclass(frozen=True)
 class SystemPrompt:
     prompt_id: int
-    version: int
     text: str
 
 

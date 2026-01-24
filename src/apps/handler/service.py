@@ -36,16 +36,14 @@ class TutorResponseHandler:
             user_message=question_text,
         )
 
-        metadata = {
-            **(llm_response.get('metadata') or {}),
-            'prompt_version_id': system_prompt.prompt_id,
-        }
+        metadata = {**(llm_response.get('metadata') or {}), 'prompt_id': system_prompt.prompt_id}
         turn = self.history_service.append_turn(
             conversation_id=conversation_id,
             user_id=user_id,
             user_text=question_text,
             assistant_text=llm_response.get('assistant_text', ''),
             metadata=metadata,
+            prompt_id=system_prompt.prompt_id,
         )
 
         return {
