@@ -1,3 +1,12 @@
+from apps.handler.service import TutorResponseHandler
+from apps.ratings_service.service import RatingsService
+from common.errors import (
+    FeedbackRequiredError,
+    LLMUpstreamError,
+    PersistenceError,
+    PromptDataError,
+    PromptNotFoundError,
+)
 from django.shortcuts import render
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -5,14 +14,6 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.handler.service import TutorResponseHandler
-from apps.ratings_service.service import RatingsService
-from common.errors import (
-    LLMUpstreamError,
-    PersistenceError,
-    PromptDataError,
-    PromptNotFoundError,
-)
 from .serializers import TurnFeedbackRequestSerializer, TutorRespondRequestSerializer
 
 
@@ -35,6 +36,16 @@ class TutorRespondView(APIView):
                 conversation_id=conversation_id,
                 question_text=data['question_text'],
             )
+        except FeedbackRequiredError as exc:
+            return Response(
+                {
+                    'detail': str(exc),
+                    'code': 'feedback_required',
+                    'last_turn_id': exc.last_turn_id,
+                    'last_turn_index': exc.last_turn_index,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         except PromptNotFoundError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_404_NOT_FOUND)
         except PromptDataError as exc:
@@ -50,6 +61,7 @@ class TutorRespondView(APIView):
         return Response(
             {
                 'conversation_id': result['conversation_id'],
+                'turn_id': result['turn_id'],
                 'tutor_response': result['tutor_response'],
                 'turn_index': result['turn_index'],
             },

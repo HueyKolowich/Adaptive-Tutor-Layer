@@ -1,8 +1,11 @@
 import uuid
 
+from apps.history_service.models import Turn
 from apps.history_service.service import HistoryService
 from apps.llm_service.service import LLMService
 from apps.prompt_service.service import PromptService
+from apps.ratings_service.models import TurnFeedback
+from common.errors import FeedbackRequiredError
 from common.types import PromptContext
 
 
@@ -28,6 +31,21 @@ class TutorResponseHandler:
 
         prompt_context = PromptContext(user_id=user_id, conversation_id=conversation_id)
         system_prompt = self.prompt_service.select_system_prompt(prompt_context)
+        # Enforce feedback required before next turn (if there is a prior turn)
+        last_turn = (
+            Turn.objects.filter(conversation_id=conversation_id, conversation__user_id=user_id)
+            .order_by('-turn_index')
+            .first()
+        )
+        if last_turn is not None:
+            has_feedback = TurnFeedback.objects.filter(turn=last_turn, user_id=user_id).exists()
+            if not has_feedback:
+                raise FeedbackRequiredError(
+                    "Feedback required before next turn.",
+                    last_turn_id=str(last_turn.id),
+                    last_turn_index=last_turn.turn_index,
+                )
+
         history = self.history_service.get_history(conversation_id, user_id)
 
         llm_response = self.llm_service.generate(
@@ -48,6 +66,7 @@ class TutorResponseHandler:
 
         return {
             'conversation_id': conversation_id,
+            'turn_id': str(turn.id),
             'turn_index': turn.turn_index,
             'tutor_response': llm_response.get('assistant_text', ''),
         }

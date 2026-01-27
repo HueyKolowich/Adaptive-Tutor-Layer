@@ -77,6 +77,19 @@
         font-size: 12px;
         color: #6b665e;
       }
+      .tabs {
+        display: flex;
+        gap: 8px;
+        margin-top: 20px;
+      }
+      .tab-btn {
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid #b3ada5;
+        background: #fff;
+        cursor: pointer;
+      }
+      .hidden { display: none; }
     </style>
   </head>
   <body>
@@ -103,6 +116,31 @@
 
       <div id="status" class="panel">Ready.</div>
       <div id="response" class="panel"></div>
+
+      <div class="tabs">
+        <button id="show-feedback" class="tab-btn" type="button">Feedback</button>
+      </div>
+
+      <form id="feedback-form" class="panel hidden">
+        <div class="meta" id="feedback-meta">Provide feedback for the last response.</div>
+        <div class="row">
+          <div>
+            <label for="rating-correctness">Correctness (1-5)</label>
+            <input id="rating-correctness" name="rating_correctness" type="number" min="1" max="5" required />
+          </div>
+          <div>
+            <label for="rating-helpfulness">Helpfulness (1-5)</label>
+            <input id="rating-helpfulness" name="rating_helpfulness" type="number" min="1" max="5" required />
+          </div>
+          <div>
+            <label for="rating-clarity">Clarity (1-5)</label>
+            <input id="rating-clarity" name="rating_clarity" type="number" min="1" max="5" required />
+          </div>
+        </div>
+        <label for="free-text">Comments (optional)</label>
+        <textarea id="free-text" name="free_text" placeholder="Share details to help improve."></textarea>
+        <button style="display: block; margin: 0 auto;" id="submit-feedback" type="submit">Submit Feedback</button>
+      </form>
     </div>
 
     <script>
@@ -110,9 +148,28 @@
       const statusEl = document.getElementById("status");
       const responseEl = document.getElementById("response");
       const submitButton = document.getElementById("submit-button");
+      const feedbackForm = document.getElementById("feedback-form");
+      const showFeedbackBtn = document.getElementById("show-feedback");
+      const feedbackMeta = document.getElementById("feedback-meta");
+
+      let lastTurnId = null;
+      let lastTurnIndex = null;
 
       function setStatus(text) {
         statusEl.textContent = text;
+      }
+
+      function showFeedbackPanel(turnIndex) {
+        feedbackForm.classList.remove("hidden");
+        showFeedbackBtn.textContent = "Feedback (open)";
+        feedbackMeta.textContent = turnIndex !== null && turnIndex !== undefined
+          ? `Provide feedback for turn ${turnIndex}.`
+          : "Provide feedback for the last response.";
+      }
+
+      function hideFeedbackPanel() {
+        feedbackForm.classList.add("hidden");
+        showFeedbackBtn.textContent = "Feedback";
       }
 
       form.addEventListener("submit", async (event) => {
@@ -138,21 +195,76 @@
 
           const payload = await resp.json();
           if (!resp.ok) {
-            setStatus(`Error ${resp.status}`);
-            responseEl.textContent = JSON.stringify(payload, null, 2);
+            if (resp.status === 409 && payload && payload.code === "feedback_required") {
+              // Backend indicates feedback is required for the last turn
+              lastTurnId = payload.last_turn_id || null;
+              lastTurnIndex = payload.last_turn_index || null;
+              alert("Feedback required before asking another question.");
+              showFeedbackPanel(lastTurnIndex);
+              setStatus(`Feedback required for turn ${lastTurnIndex}`);
+            } else {
+              setStatus(`Error ${resp.status}`);
+              responseEl.textContent = JSON.stringify(payload, null, 2);
+            }
             return;
           }
 
           if (payload.conversation_id) {
             form.conversation_id.value = payload.conversation_id;
           }
+          lastTurnId = payload.turn_id || null;
+          lastTurnIndex = payload.turn_index || null;
           setStatus(`Turn ${payload.turn_index}`);
           responseEl.textContent = payload.tutor_response || "(empty response)";
+          // Make feedback panel accessible after a response
+          showFeedbackPanel(payload.turn_index);
         } catch (err) {
           setStatus("Request failed.");
           responseEl.textContent = err.toString();
         } finally {
           submitButton.disabled = false;
+        }
+      });
+
+      showFeedbackBtn.addEventListener("click", () => {
+        if (feedbackForm.classList.contains("hidden")) {
+          showFeedbackPanel(lastTurnIndex);
+        } else {
+          hideFeedbackPanel();
+        }
+      });
+
+      feedbackForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!lastTurnId) {
+          alert("No recent turn to provide feedback for.");
+          return;
+        }
+        const payload = {
+          user_id: form.user_id.value.trim(),
+          rating_correctness: parseInt(feedbackForm.rating_correctness.value, 10),
+          rating_helpfulness: parseInt(feedbackForm.rating_helpfulness.value, 10),
+          rating_clarity: parseInt(feedbackForm.rating_clarity.value, 10),
+          free_text: feedbackForm.free_text.value.trim() || null,
+        };
+        try {
+          const resp = await fetch(`/api/turns/${lastTurnId}/feedback`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await resp.json();
+          if (!resp.ok) {
+            alert(`Failed to submit feedback (${resp.status}).`);
+            console.warn(data);
+            return;
+          }
+          alert("Feedback submitted. You can ask another question now.");
+          setStatus(`Feedback submitted for turn ${lastTurnIndex}.`);
+          hideFeedbackPanel();
+        } catch (err) {
+          alert("Feedback request failed.");
+          console.error(err);
         }
       });
     </script>

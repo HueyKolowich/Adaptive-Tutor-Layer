@@ -2,6 +2,11 @@
 
 Minimal Django backend for the V0 tutoring flow.
 
+## Feedback Requirement
+- Users must submit feedback for the previous tutor response before sending the next question.
+- Respond endpoint returns HTTP 409 with `code: feedback_required` when feedback is missing, including `last_turn_id` and `last_turn_index`.
+- The sample app UI includes a Feedback tab/panel and shows an alert when blocked.
+
 ## Local dev (venv)
 
 ```bash
@@ -60,4 +65,64 @@ Note: The Docker image runs `python src/manage.py migrate --noinput` automatical
   "conversation_id": "optional-uuid",
   "question_text": "What is photosynthesis?"
 }
+```
+
+Successful response (200):
+
+```json
+{
+  "conversation_id": "uuid",
+  "turn_id": "uuid",
+  "turn_index": 0,
+  "tutor_response": "..."
+}
+```
+
+Feedback required (409):
+
+```json
+{
+  "detail": "Feedback required before next turn.",
+  "code": "feedback_required",
+  "last_turn_id": "uuid",
+  "last_turn_index": 0
+}
+```
+
+`POST /api/turns/<turn_id>/feedback`
+
+Body:
+
+```json
+{
+  "user_id": "user-123",
+  "rating_correctness": 5,
+  "rating_helpfulness": 4,
+  "rating_clarity": 4,
+  "free_text": "optional"
+}
+```
+
+### Quick Test (cURL)
+
+```bash
+# First turn (allowed)
+curl -sS -X POST http://localhost:8000/api/tutor/respond \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"user-123","question_text":"What is backpropagation?"}'
+
+# Second turn without feedback (blocked)
+curl -sS -X POST http://localhost:8000/api/tutor/respond \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"user-123","conversation_id":"<copy from first>","question_text":"Explain gradients"}'
+
+# Submit feedback
+curl -sS -X POST http://localhost:8000/api/turns/<last_turn_id>/feedback \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"user-123","rating_correctness":5,"rating_helpfulness":4,"rating_clarity":4,"free_text":"Good explanation."}'
+
+# Next turn (allowed)
+curl -sS -X POST http://localhost:8000/api/tutor/respond \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"user-123","conversation_id":"<same>","question_text":"Show an example"}'
 ```
