@@ -88,6 +88,7 @@
         border: 1px solid #b3ada5;
         background: #fff;
         cursor: pointer;
+        color:#1c1c1c;
       }
       .hidden { display: none; }
     </style>
@@ -118,7 +119,7 @@
       <div id="response" class="panel"></div>
 
       <div class="tabs">
-        <button id="show-feedback" class="tab-btn" type="button">Feedback</button>
+        <button id="show-feedback" class="tab-btn" type="button">Open Feedback</button>
       </div>
 
       <form id="feedback-form" class="panel hidden">
@@ -161,7 +162,7 @@
 
       function showFeedbackPanel(turnIndex) {
         feedbackForm.classList.remove("hidden");
-        showFeedbackBtn.textContent = "Feedback (open)";
+        showFeedbackBtn.textContent = "Close Feedback";
         feedbackMeta.textContent = turnIndex !== null && turnIndex !== undefined
           ? `Provide feedback for turn ${turnIndex}.`
           : "Provide feedback for the last response.";
@@ -169,7 +170,7 @@
 
       function hideFeedbackPanel() {
         feedbackForm.classList.add("hidden");
-        showFeedbackBtn.textContent = "Feedback";
+        showFeedbackBtn.textContent = "Open Feedback";
       }
 
       form.addEventListener("submit", async (event) => {
