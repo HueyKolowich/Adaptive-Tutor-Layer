@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.contrib.auth.decorators import login_required
 from django.http import Http404, HttpResponse
 from django.shortcuts import render
 from django.utils.decorators import method_decorator
@@ -7,9 +8,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .serializers import TurnFeedbackRequestSerializer, TutorRespondRequestSerializer
 from apps.handler.service import TutorResponseHandler
-from apps.history_service.service import HistoryService
 from apps.ratings_service.service import RatingsService
 from common.errors import (
     FeedbackRequiredError,
@@ -18,7 +17,8 @@ from common.errors import (
     PromptDataError,
     PromptNotFoundError,
 )
-from django.contrib.auth.decorators import login_required
+
+from .serializers import TurnFeedbackRequestSerializer, TutorRespondRequestSerializer
 
 
 @method_decorator(csrf_exempt, name='dispatch')
