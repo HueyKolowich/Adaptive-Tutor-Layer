@@ -1,6 +1,11 @@
 from django.urls import path
 
-from apps.api.views import ConversationHistoryView, ConversationListView, TurnFeedbackView, TutorRespondView
+from apps.api.views import (
+    ConversationHistoryView,
+    ConversationListView,
+    TurnFeedbackView,
+    TutorRespondView,
+)
 
 urlpatterns = [
     path('tutor/respond', TutorRespondView.as_view(), name='tutor-respond'),
