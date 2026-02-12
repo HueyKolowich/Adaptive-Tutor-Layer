@@ -86,15 +86,28 @@
         background: #fff; border: 1px solid #e0ddd7; border-bottom-left-radius: 4px;
       }
 
-      /* feedback badge on assistant messages */
-      .msg-footer { display: flex; gap: 6px; margin-top: 4px; }
-      .fb-btn {
-        font-size: 11px; padding: 3px 8px; border-radius: 4px;
-        border: 1px solid #d4d0ca; background: #faf9f6; cursor: pointer;
-        color: #555;
+      /* feedback checkbox beneath assistant messages */
+      .msg-footer { display: flex; gap: 6px; margin-top: 6px; }
+      .fb-check {
+        display: inline-flex; align-items: center; gap: 5px;
+        cursor: pointer; font-size: 12px; color: #888;
+        background: none; border: none; padding: 0; font-family: inherit;
       }
-      .fb-btn:hover { background: #eee; }
-      .fb-btn.done { background: #e6f4ea; border-color: #b7dfc0; color: #1a7431; cursor: default; }
+      .fb-check:hover { color: #555; }
+      .fb-check .cb-box {
+        width: 15px; height: 15px; border-radius: 3px;
+        border: 1.5px solid #bbb; display: flex;
+        align-items: center; justify-content: center;
+        transition: all .15s ease; flex-shrink: 0;
+      }
+      .fb-check:hover .cb-box { border-color: #888; }
+      .fb-check.done { color: #1a7431; cursor: default; }
+      .fb-check.done .cb-box {
+        background: #1a7431; border-color: #1a7431;
+      }
+      .fb-check.done .cb-box svg { display: block; }
+      .fb-check .cb-box svg { display: none; fill: #fff; width: 11px; height: 11px; }
+      .fb-check.highlight .cb-box { border-color: #d4a017; box-shadow: 0 0 0 2px rgba(212,160,23,.25); }
 
       /* typing indicator */
       .typing-indicator { display: flex; gap: 4px; padding: 8px 14px; }
@@ -290,14 +303,13 @@
         body.textContent = text;
 
         wrap.appendChild(avatar);
-        wrap.appendChild(body);
 
         if (role === "assistant" && turnId) {
           const footer = document.createElement("div");
           footer.className = "msg-footer";
           const fbBtn = document.createElement("button");
-          fbBtn.className = "fb-btn" + (hasFeedback ? " done" : "");
-          fbBtn.textContent = hasFeedback ? "Feedback sent" : "Rate this response";
+          fbBtn.className = "fb-check" + (hasFeedback ? " done" : "");
+          fbBtn.innerHTML = '<span class="cb-box"><svg viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>' + (hasFeedback ? 'Feedback submitted' : 'Provide feedback');
           if (!hasFeedback) {
             fbBtn.addEventListener("click", () => openFeedbackModal(turnId, turnIndex, fbBtn));
           }
@@ -306,7 +318,9 @@
           const col = document.createElement("div");
           col.appendChild(body);
           col.appendChild(footer);
-          wrap.replaceChild(col, body);
+          wrap.appendChild(col);
+        } else {
+          wrap.appendChild(body);
         }
 
         chatMessages.appendChild(wrap);
@@ -376,13 +390,16 @@
             if (resp.status === 409 && payload.code === "feedback_required") {
               activeFeedbackTurnId = payload.last_turn_id;
               activeFeedbackTurnIndex = payload.last_turn_index;
-              // highlight the un-rated message
+              // remove the user bubble we just appended (the turn wasn't accepted)
+              const lastUserMsg = chatMessages.querySelector(".msg.user:last-of-type");
+              if (lastUserMsg && !lastUserMsg.dataset.turnId) lastUserMsg.remove();
+              // highlight the un-rated checkbox
               const unrated = document.querySelector(
-                `.msg.assistant[data-turn-id="${payload.last_turn_id}"] .fb-btn:not(.done)`
+                `.msg.assistant[data-turn-id="${payload.last_turn_id}"] .fb-check:not(.done)`
               );
-              if (unrated) unrated.style.background = "#fff3cd";
+              if (unrated) unrated.classList.add("highlight");
               openFeedbackModal(payload.last_turn_id, payload.last_turn_index, unrated);
-              // re-add the user message we just sent so they don't lose it
+              // restore the text so the user doesn't lose it
               questionInput.value = text;
             } else {
               addMessage("assistant", `Error ${resp.status}: ${payload.detail || JSON.stringify(payload)}`, null, null, false);
@@ -481,14 +498,14 @@
             console.warn(data);
             return;
           }
-          // Mark the button as done
+          // Mark the checkbox as checked
           const btn = document.querySelector(
-            `.msg.assistant[data-turn-id="${activeFeedbackTurnId}"] .fb-btn`
+            `.msg.assistant[data-turn-id="${activeFeedbackTurnId}"] .fb-check`
           );
           if (btn) {
             btn.classList.add("done");
-            btn.textContent = "Feedback sent";
-            btn.style.background = "";
+            btn.classList.remove("highlight");
+            btn.innerHTML = '<span class="cb-box"><svg viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Feedback submitted';
             btn.replaceWith(btn.cloneNode(true)); // remove listeners
           }
           feedbackModal.classList.remove("open");
