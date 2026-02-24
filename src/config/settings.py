@@ -137,3 +137,21 @@ LLM_TIMEOUT_SECONDS = int(os.getenv('LLM_TIMEOUT_SECONDS', '15'))
 LLM_DEFAULT_MODEL = os.getenv('LLM_DEFAULT_MODEL', 'grok-4-1-fast-non-reasoning')
 LLM_DEFAULT_TEMPERATURE = float(os.getenv('LLM_DEFAULT_TEMPERATURE', '0.7'))
 LLM_DEFAULT_MAX_TOKENS = int(os.getenv('LLM_DEFAULT_MAX_TOKENS', '512'))
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+OBSERVABILITY_MODE = _env_bool('OBSERVABILITY_MODE', False)
+OBS_EVENTS_STRICT = _env_bool('OBS_EVENTS_STRICT', False)
+OBS_REDIS_URL = os.getenv('OBS_REDIS_URL', 'redis://localhost:6379/0')
+OBS_REDIS_STREAM_KEY = os.getenv('OBS_REDIS_STREAM_KEY', 'atl:state-events')
+OBS_REDIS_MAXLEN = int(os.getenv('OBS_REDIS_MAXLEN', '2000'))
+NINJA_PANEL_URL = os.getenv('NINJA_PANEL_URL', 'http://localhost:3001')
+
+_baseline_prompt_id_raw = os.getenv('BASELINE_PROMPT_ID', '').strip()
+BASELINE_PROMPT_ID = int(_baseline_prompt_id_raw) if _baseline_prompt_id_raw else None

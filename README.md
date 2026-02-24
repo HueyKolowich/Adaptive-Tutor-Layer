@@ -31,6 +31,10 @@ Simple UI (no build tools):
 
 - http://127.0.0.1:8000/app/
 
+Legacy panel route now redirects to the standalone Ninja panel service:
+
+- http://127.0.0.1:8000/panel/?conversation_id=<uuid>
+
 ## Docker (SQLite persistence)
 
 Build the image:
@@ -54,6 +58,29 @@ docker run -p 8000:8000 \
 ```
 
 Note: The Docker image runs `python src/manage.py migrate --noinput` automatically on startup.
+
+## Docker Compose (API + Redis + Ninja Panel)
+
+Start the full real-time observability stack:
+
+```bash
+docker compose up --build
+```
+
+Services:
+
+- API: http://127.0.0.1:8000
+- Ninja Panel: http://127.0.0.1:3001/?conversation_id=<uuid>
+- Redis: `localhost:6379`
+
+The compose file defaults to:
+
+- `OBSERVABILITY_MODE=true`
+- `OBS_EVENTS_STRICT=true`
+- `OBS_REDIS_URL=redis://redis:6379/0`
+- `OBS_REDIS_STREAM_KEY=atl:state-events`
+- `NINJA_PANEL_URL=http://localhost:3001`
+- `BASELINE_PROMPT_ID=1` (set this to an existing active prompt id in your DB)
 
 ## API
 

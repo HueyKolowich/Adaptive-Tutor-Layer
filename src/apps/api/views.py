@@ -1,6 +1,11 @@
+from __future__ import annotations
+
+import uuid
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.http import Http404, HttpResponse
+from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -17,6 +22,7 @@ from common.errors import (
     PromptDataError,
     PromptNotFoundError,
 )
+from common.observability import publish_state_event
 
 from .serializers import TurnFeedbackRequestSerializer, TutorRespondRequestSerializer
 
@@ -31,16 +37,44 @@ class TutorRespondView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        conversation_id = data.get('conversation_id') or None
+        user_id = data['user_id']
+        conversation_id = data.get('conversation_id') or str(uuid.uuid4())
+        question_text = data['question_text']
+        trace_id = str(uuid.uuid4())
+
+        publish_state_event(
+            event_type='student.question_received',
+            conversation_id=conversation_id,
+            user_id=user_id,
+            trace_id=trace_id,
+            node='student',
+            payload={'question_text': question_text[:300]},
+        )
+
         handler = TutorResponseHandler()
 
         try:
             result = handler.generate_response(
-                user_id=data['user_id'],
+                user_id=user_id,
                 conversation_id=conversation_id,
-                question_text=data['question_text'],
+                question_text=question_text,
+                trace_id=trace_id,
             )
         except FeedbackRequiredError as exc:
+            publish_state_event(
+                event_type='pipeline.error',
+                conversation_id=conversation_id,
+                user_id=user_id,
+                trace_id=trace_id,
+                node='student',
+                payload={
+                    'stage': 'feedback_gate',
+                    'error_type': type(exc).__name__,
+                    'detail': str(exc),
+                    'last_turn_id': exc.last_turn_id,
+                    'last_turn_index': exc.last_turn_index,
+                },
+            )
             return Response(
                 {
                     'detail': str(exc),
@@ -51,15 +85,64 @@ class TutorRespondView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
         except PromptNotFoundError as exc:
+            publish_state_event(
+                event_type='pipeline.error',
+                conversation_id=conversation_id,
+                user_id=user_id,
+                trace_id=trace_id,
+                node='bandit',
+                payload={
+                    'stage': 'prompt_selection',
+                    'error_type': type(exc).__name__,
+                    'detail': str(exc),
+                },
+            )
             return Response({'detail': str(exc)}, status=status.HTTP_404_NOT_FOUND)
         except PromptDataError as exc:
+            publish_state_event(
+                event_type='pipeline.error',
+                conversation_id=conversation_id,
+                user_id=user_id,
+                trace_id=trace_id,
+                node='bandit',
+                payload={
+                    'stage': 'prompt_selection',
+                    'error_type': type(exc).__name__,
+                    'detail': str(exc),
+                },
+            )
             return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except LLMUpstreamError as exc:
+            publish_state_event(
+                event_type='pipeline.error',
+                conversation_id=conversation_id,
+                user_id=user_id,
+                trace_id=trace_id,
+                node='llm',
+                payload={
+                    'stage': 'llm',
+                    'error_type': type(exc).__name__,
+                    'detail': str(exc),
+                    'status': exc.status,
+                },
+            )
             return Response(
                 {'detail': str(exc), 'status': exc.status, 'body': exc.body},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
         except PersistenceError as exc:
+            publish_state_event(
+                event_type='pipeline.error',
+                conversation_id=conversation_id,
+                user_id=user_id,
+                trace_id=trace_id,
+                node='adaptive',
+                payload={
+                    'stage': 'persistence',
+                    'error_type': type(exc).__name__,
+                    'detail': str(exc),
+                },
+            )
             return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response(
@@ -83,6 +166,7 @@ class TurnFeedbackView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        trace_id = str(uuid.uuid4())
         ratings_service = RatingsService()
         try:
             feedback, evaluation = ratings_service.record_feedback_and_evaluate(
@@ -92,10 +176,25 @@ class TurnFeedbackView(APIView):
                 rating_helpfulness=data['rating_helpfulness'],
                 rating_clarity=data['rating_clarity'],
                 free_text=data.get('free_text'),
+                trace_id=trace_id,
             )
         except PersistenceError as exc:
+            self._emit_feedback_error(
+                turn_id=turn_id,
+                user_id=data['user_id'],
+                trace_id=trace_id,
+                stage='feedback_persistence',
+                exc=exc,
+            )
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as exc:  # safeguard
+            self._emit_feedback_error(
+                turn_id=turn_id,
+                user_id=data['user_id'],
+                trace_id=trace_id,
+                stage='feedback_unknown',
+                exc=exc,
+            )
             return Response({'detail': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response(
@@ -121,6 +220,27 @@ class TurnFeedbackView(APIView):
                 },
             },
             status=status.HTTP_201_CREATED,
+        )
+
+    def _emit_feedback_error(self, turn_id: str, user_id: str, trace_id: str, stage: str, exc: Exception) -> None:
+        from apps.history_service.models import Turn as TurnModel
+
+        turn = TurnModel.objects.filter(id=turn_id).only('conversation_id').first()
+        if not turn:
+            return
+
+        publish_state_event(
+            event_type='pipeline.error',
+            conversation_id=str(turn.conversation_id),
+            user_id=user_id,
+            trace_id=trace_id,
+            node='qscore',
+            turn_id=str(turn_id),
+            payload={
+                'stage': stage,
+                'error_type': type(exc).__name__,
+                'detail': str(exc)[:180],
+            },
         )
 
 
@@ -198,8 +318,17 @@ def app_view(request):
 
 
 def ninja_panel_view(request):
-    panel_path = settings.BASE_DIR / 'apps' / 'api' / 'templates' / 'panel' / 'index.html'
-    if not panel_path.exists():
-        raise Http404("Ninja panel not found.")
-    content = panel_path.read_text(encoding='utf-8')
-    return HttpResponse(content, content_type='text/html')
+    target = settings.NINJA_PANEL_URL
+    parsed = urlsplit(target)
+    incoming_params = dict(parse_qsl(request.META.get('QUERY_STRING', ''), keep_blank_values=True))
+    existing_params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    existing_params.update(incoming_params)
+
+    redirect_url = urlunsplit((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path or '/',
+        urlencode(existing_params),
+        parsed.fragment,
+    ))
+    return HttpResponseRedirect(redirect_url)

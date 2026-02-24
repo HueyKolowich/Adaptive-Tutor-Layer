@@ -1,0 +1,1495 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Adaptive Tutor Layer · Ninja Panel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+      integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", system-ui, -apple-system, sans-serif;
+        background: radial-gradient(circle at 20% 20%, rgba(89, 129, 255, 0.08), transparent 40%),
+          radial-gradient(circle at 80% 0%, rgba(255, 114, 94, 0.08), transparent 35%),
+          #05070f;
+        color: #e9ecf5;
+        min-height: 100vh;
+      }
+      h1 {
+        margin: 0;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+      }
+      .shell {
+        max-width: 1680px;
+        margin: 0 auto;
+        padding: 24px clamp(16px, 4vw, 32px) 48px;
+      }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 12px;
+        gap: 10px;
+      }
+      .muted {
+        color: #8fa6d1;
+        font-size: 13px;
+      }
+      .btn {
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(255, 255, 255, 0.04);
+        color: #fff;
+        border-radius: 12px;
+        padding: 10px 14px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        cursor: pointer;
+      }
+      .btn:active {
+        transform: translateY(1px);
+      }
+      .canvas {
+        position: relative;
+        width: 100%;
+        min-height: 88vh;
+        border-radius: 20px;
+        overflow: hidden;
+        background: linear-gradient(135deg, rgba(19, 30, 54, 0.9), rgba(9, 14, 28, 0.92));
+        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+      }
+      .stage {
+        position: absolute;
+        inset: 20px;
+        border-radius: 16px;
+      }
+      .nodes-layer {
+        position: absolute;
+        inset: 0;
+      }
+      .node {
+        position: absolute;
+        min-width: 200px;
+        max-width: 280px;
+        padding: 14px;
+        border-radius: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.04);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        backdrop-filter: blur(4px);
+        transition: border-color 120ms linear, box-shadow 120ms linear;
+      }
+      .node h3 {
+        margin: 0 0 6px;
+        font-size: 14px;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+      }
+      .node .body {
+        font-size: 13px;
+        color: #c7d4f2;
+        line-height: 1.5;
+        display: -webkit-box;
+        -webkit-line-clamp: 5;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .node::after {
+        content: "";
+        position: absolute;
+        inset: -1px;
+        border-radius: 14px;
+        pointer-events: none;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+      }
+      .node:active {
+        cursor: grabbing;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        letter-spacing: 0.2px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .mono {
+        font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+      }
+      .status-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
+      .error-line {
+        color: #ffb4b4;
+        font-size: 12px;
+        margin-top: 6px;
+      }
+      svg.paths {
+        position: absolute;
+        inset: 0;
+        overflow: visible;
+        pointer-events: none;
+      }
+      .edge {
+        stroke-dasharray: 5 10;
+        opacity: 0.22;
+      }
+      .edge.active {
+        opacity: 1;
+        animation: dash 2.1s linear infinite;
+      }
+      .edge-label {
+        font-size: 11px;
+        fill: #c7d4f2;
+        letter-spacing: 0.2px;
+        paint-order: stroke;
+        stroke: rgba(5, 7, 15, 0.6);
+        stroke-width: 3px;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      @keyframes dash {
+        to {
+          stroke-dashoffset: -200;
+        }
+      }
+      .glow {
+        filter: drop-shadow(0 0 6px rgba(111, 213, 255, 0.35));
+      }
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        display: grid;
+        place-items: center;
+        z-index: 20;
+        padding: 16px;
+      }
+      .modal {
+        width: min(560px, 92vw);
+        background: #0c1224;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        padding: 18px;
+        color: #e9ecf5;
+      }
+      .modal h4 {
+        margin: 0 0 10px;
+        font-size: 16px;
+        letter-spacing: 0.3px;
+      }
+      .modal table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      .modal th,
+      .modal td {
+        padding: 6px 4px;
+        text-align: left;
+      }
+      .modal th {
+        color: #8fa6d1;
+        font-weight: 600;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .modal tr + tr td {
+        border-top: 1px solid rgba(255, 255, 255, 0.04);
+      }
+      .missing {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .missing-card {
+        max-width: 700px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 16px;
+        padding: 24px;
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .dist-panel {
+        margin-top: 14px;
+        border-radius: 18px;
+        border: 1px solid rgba(122, 163, 255, 0.28);
+        background:
+          radial-gradient(circle at 12% 0%, rgba(74, 144, 255, 0.2), transparent 32%),
+          radial-gradient(circle at 86% 100%, rgba(45, 212, 191, 0.16), transparent 34%),
+          linear-gradient(130deg, rgba(13, 22, 43, 0.94), rgba(9, 15, 30, 0.96));
+        box-shadow:
+          0 22px 48px rgba(3, 9, 24, 0.6),
+          inset 0 0 0 1px rgba(130, 188, 255, 0.12);
+        padding: 14px 16px 16px;
+      }
+      .dist-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+      }
+      .dist-title {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .dist-title h2 {
+        margin: 0;
+        font-size: 15px;
+        letter-spacing: 0.3px;
+        color: #d9e7ff;
+      }
+      .dist-icon {
+        width: 30px;
+        height: 30px;
+        border-radius: 9px;
+        display: grid;
+        place-items: center;
+        color: #8ad7ff;
+        background: rgba(123, 194, 255, 0.14);
+        box-shadow: 0 0 0 1px rgba(123, 194, 255, 0.28);
+      }
+      .dist-sub {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .dist-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 10px;
+      }
+      .dist-card {
+        position: relative;
+        border-radius: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
+        padding: 11px;
+        overflow: hidden;
+      }
+      .dist-card.selected {
+        border-color: rgba(146, 255, 211, 0.58);
+        box-shadow:
+          0 0 0 1px rgba(146, 255, 211, 0.23),
+          0 10px 24px rgba(24, 70, 55, 0.36);
+      }
+      .dist-card::after {
+        content: "";
+        position: absolute;
+        inset: -40% auto auto -30%;
+        width: 70%;
+        height: 80%;
+        transform: rotate(-7deg);
+        pointer-events: none;
+        opacity: 0.22;
+        background: radial-gradient(circle at 0% 0%, var(--dist-color, #60a5fa), transparent 60%);
+      }
+      .dist-card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .dist-card-title {
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .dist-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--dist-color, #60a5fa);
+        box-shadow: 0 0 0 4px color-mix(in srgb, var(--dist-color, #60a5fa), transparent 70%);
+      }
+      .dist-metrics {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+      }
+      .dist-metric {
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        padding: 5px 7px;
+      }
+      .dist-metric .k {
+        font-size: 11px;
+        color: #90a3ca;
+      }
+      .dist-metric .v {
+        margin-top: 2px;
+        font-size: 12px;
+      }
+      .dist-plot-wrap {
+        margin-top: 8px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+          linear-gradient(0deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+        background-size: auto, 16px 100%, 100% 12px;
+        padding: 6px 7px 4px;
+      }
+      .dist-axis {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 3px;
+        color: #8395be;
+        font-size: 11px;
+      }
+      .dist-empty {
+        border-radius: 12px;
+        border: 1px dashed rgba(144, 167, 214, 0.35);
+        padding: 16px;
+        color: #9ab0db;
+        font-size: 13px;
+      }
+      @media (max-width: 860px) {
+        .dist-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel">
+      const layout = {
+        nodes: [
+          { id: 'student', label: 'Student Input', color: '#60A5FA', x: 13.6, y: 16.6 },
+          { id: 'bandit', label: 'Policy Selector (Bandit)', color: '#34D399', x: 29.0, y: 50.6 },
+          { id: 'policies', label: 'Available Policies', color: '#93C5FD', x: 13.4, y: 86.1 },
+          { id: 'static_policy', label: 'Static Policy (Control)', color: '#FB923C', x: 37.2, y: 14.5 },
+          { id: 'adaptive', label: 'Adaptive Tutor', color: '#2DD4BF', x: 85.5, y: 64.9 },
+          { id: 'baseline', label: 'Baseline Tutor', color: '#FBBF24', x: 85.1, y: 23.3 },
+          { id: 'qscore', label: 'Q-score Evaluator', color: '#67E8F9', x: 54.2, y: 73.3 },
+          { id: 'llm', label: 'Language Model', color: '#F472B6', x: 57.9, y: 29.4 },
+        ],
+        edges: [
+          { from: 'student', to: 'bandit', color: '#60A5FA', label: 'Learner identity/history' },
+          { from: 'student', to: 'static_policy', color: '#FB923C', label: 'Control path' },
+          { from: 'policies', to: 'bandit', color: '#93C5FD', label: 'Policy candidates' },
+          { from: 'bandit', to: 'llm', color: '#34D399', label: 'Selected policy' },
+          { from: 'static_policy', to: 'llm', color: '#FB923C', label: 'Fixed prompt' },
+          { from: 'llm', to: 'adaptive', color: '#2DD4BF', label: 'Adaptive response' },
+          { from: 'llm', to: 'baseline', color: '#FBBF24', label: 'Baseline response' },
+          { from: 'adaptive', to: 'qscore', color: '#67E8F9', label: 'Score adaptive' },
+          { from: 'qscore', to: 'policies', color: '#67E8F9', label: 'Reward update' },
+          { from: 'qscore', to: 'bandit', color: '#34D399', label: 'Arm state update' },
+        ],
+      };
+
+      const hotMs = 4200;
+
+      function clamp(v, lo, hi) {
+        return Math.max(lo, Math.min(hi, v));
+      }
+
+      function pickPort(fromRect, toRect) {
+        const fx = fromRect.x + fromRect.width / 2;
+        const fy = fromRect.y + fromRect.height / 2;
+        const tx = toRect.x + toRect.width / 2;
+        const ty = toRect.y + toRect.height / 2;
+
+        const dx = tx - fx;
+        const dy = ty - fy;
+        const horizontal = Math.abs(dx) >= Math.abs(dy);
+
+        const from = horizontal
+          ? (dx >= 0 ? { x: fromRect.x + fromRect.width, y: fy } : { x: fromRect.x, y: fy })
+          : (dy >= 0 ? { x: fx, y: fromRect.y + fromRect.height } : { x: fx, y: fromRect.y });
+
+        const to = horizontal
+          ? (dx >= 0 ? { x: toRect.x, y: ty } : { x: toRect.x + toRect.width, y: ty })
+          : (dy >= 0 ? { x: tx, y: toRect.y } : { x: tx, y: toRect.y + toRect.height });
+
+        return { from, to };
+      }
+
+      function bezierPath(from, to) {
+        const dx = to.x - from.x;
+        const c = Math.min(140, Math.max(70, Math.abs(dx) * 0.35));
+        const c1 = { x: from.x + Math.sign(dx || 1) * c, y: from.y };
+        const c2 = { x: to.x - Math.sign(dx || 1) * c, y: to.y };
+        return `M ${from.x} ${from.y} C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${to.x} ${to.y}`;
+      }
+
+      function labelPath(from, to) {
+        const leftToRight = from.x <= to.x;
+        return bezierPath(leftToRight ? from : to, leftToRight ? to : from);
+      }
+
+      function getConversationId() {
+        const params = new URLSearchParams(window.location.search);
+        return (params.get('conversation_id') || '').trim();
+      }
+
+      function makeEmptySnapshot(conversationId) {
+        return {
+          id: `Conversation ${conversationId.slice(0, 8)} · Live`,
+          student: {
+            id: 'unknown',
+            persona: 'Waiting for events',
+            topic: 'Unknown',
+          },
+          policy: {
+            current: '(pending)',
+            reason: [],
+          },
+          bandit: {
+            learner_profile: ['No decisions yet'],
+            traffic: [],
+          },
+          policies: {
+            candidates: [],
+            note: 'Waiting for policy scoring events.',
+          },
+          static_policy: {
+            name: '(pending)',
+          },
+          turn: {
+            question: 'Waiting for student question…',
+            adaptive: 'Waiting for adaptive response…',
+            baseline: 'Waiting for baseline response…',
+            flags: [],
+            prompts: {
+              adaptive: '(pending)',
+              baseline: '(pending)',
+            },
+          },
+          llm: {
+            model: '(pending)',
+            temperature: '?',
+            maxTokens: '?',
+            note: 'Awaiting LLM events',
+          },
+          qscore: {
+            q: null,
+            delta_vs_baseline: null,
+            reward: null,
+            components: {
+              correctness: null,
+              clarity: null,
+              pedagogy: null,
+            },
+            rubric: [],
+          },
+        };
+      }
+
+      function formatPromptName(promptId) {
+        return promptId == null ? '(pending)' : `Prompt #${promptId}`;
+      }
+
+      function normalizeTraffic(candidates) {
+        if (!candidates.length) return [];
+        const shifted = candidates.map((c) => Math.exp(c.sampled_theta || 0));
+        const total = shifted.reduce((sum, v) => sum + v, 0) || 1;
+        return candidates.map((c, i) => ({
+          name: formatPromptName(c.prompt_id),
+          share: shifted[i] / total,
+          q: c.posterior_mu,
+        }));
+      }
+
+      const promptPalette = [
+        '#5B8EFF',
+        '#2DD4BF',
+        '#FBBF24',
+        '#FB7185',
+        '#A78BFA',
+        '#34D399',
+        '#7DD3FC',
+      ];
+
+      function colorForPrompt(promptId, fallbackIndex = 0) {
+        const source = Number.isFinite(Number(promptId)) ? Number(promptId) : fallbackIndex;
+        return promptPalette[Math.abs(source) % promptPalette.length];
+      }
+
+      function posteriorSigma(lambdaValue) {
+        const safe = Math.max(Number(lambdaValue) || 0, 1e-9);
+        return 1 / Math.sqrt(safe);
+      }
+
+      function gaussianPdf(x, mu, sigma) {
+        const safeSigma = Math.max(Number(sigma) || 0, 1e-6);
+        const z = (x - mu) / safeSigma;
+        return Math.exp(-0.5 * z * z) / (safeSigma * Math.sqrt(2 * Math.PI));
+      }
+
+      function buildPosteriorCurve(mu, sigma, width, height) {
+        const padTop = 4;
+        const padBottom = 6;
+        const padLeft = 0;
+        const padRight = 0;
+        const drawableW = Math.max(width, 1);
+        const drawableH = Math.max(height - padTop - padBottom, 1);
+        const steps = 72;
+        const points = [];
+        let peak = 0;
+        for (let i = 0; i <= steps; i += 1) {
+          const x = i / steps;
+          const y = gaussianPdf(x, mu, sigma);
+          peak = Math.max(peak, y);
+          points.push({ x, y });
+        }
+        const denom = peak || 1;
+        const minTailLift = 0.025;
+        const path = points.map((p, i) => {
+          const px = p.x * drawableW;
+          const norm = p.y / denom;
+          const liftedNorm = minTailLift + (1 - minTailLift) * norm;
+          const py = (height - padBottom) - (liftedNorm * drawableH);
+          return `${i === 0 ? 'M' : 'L'} ${px.toFixed(2)} ${py.toFixed(2)}`;
+        }).join(' ');
+        return {
+          path,
+          peak,
+          geometry: { padTop, padBottom, padLeft, padRight, drawableW, drawableH },
+        };
+      }
+
+      function applyEvent(prev, evt) {
+        const payload = evt.payload || {};
+
+        if (evt.event_type === 'student.question_received') {
+          return {
+            ...prev,
+            student: {
+              ...prev.student,
+              id: evt.user_id || prev.student.id,
+              persona: 'Live learner session',
+            },
+            turn: {
+              ...prev.turn,
+              question: payload.question_text || prev.turn.question,
+            },
+          };
+        }
+
+        if (evt.event_type === 'bandit.candidates_scored') {
+          const candidates = (payload.candidates || []).map((c) => ({
+            name: formatPromptName(c.prompt_id),
+            tag: c.selected ? 'Selected' : 'Candidate',
+            mean_q: c.posterior_mu ?? 0,
+            posterior_lambda: c.posterior_lambda ?? null,
+            sampled_theta: c.sampled_theta ?? 0,
+            prompt_id: c.prompt_id,
+          }));
+
+          return {
+            ...prev,
+            bandit: {
+              ...prev.bandit,
+              learner_profile: [
+                `Learner=${evt.user_id || 'unknown'}`,
+                `Turn=${payload.turn_number ?? '?'}`,
+                `Conversation=${evt.conversation_id?.slice(0, 8) || '?'}`,
+              ],
+              traffic: normalizeTraffic(payload.candidates || []),
+            },
+            policies: {
+              ...prev.policies,
+              candidates,
+              note: `Scored ${candidates.length} prompt arm(s).`,
+            },
+          };
+        }
+
+        if (evt.event_type === 'bandit.prompt_selected') {
+          const pid = payload.prompt_id;
+          return {
+            ...prev,
+            policy: {
+              ...prev.policy,
+              current: formatPromptName(pid),
+              reason: [
+                `Sampled θ = ${(payload.sampled_theta ?? 0).toFixed(4)}`,
+                payload.guardrail_applied ? 'Streak guardrail applied' : 'Thompson sample winner',
+              ],
+            },
+            turn: {
+              ...prev.turn,
+              prompts: {
+                ...prev.turn.prompts,
+                adaptive: formatPromptName(pid),
+              },
+            },
+          };
+        }
+
+        if (evt.event_type === 'control.baseline_prompt_selected') {
+          const pid = payload.prompt_id;
+          return {
+            ...prev,
+            static_policy: {
+              ...prev.static_policy,
+              name: formatPromptName(pid),
+            },
+            turn: {
+              ...prev.turn,
+              prompts: {
+                ...prev.turn.prompts,
+                baseline: formatPromptName(pid),
+              },
+            },
+          };
+        }
+
+        if (evt.event_type === 'llm.adaptive_started') {
+          return {
+            ...prev,
+            llm: {
+              ...prev.llm,
+              note: `Adaptive generation started (${formatPromptName(payload.prompt_id)})`,
+            },
+          };
+        }
+
+        if (evt.event_type === 'llm.adaptive_completed') {
+          return {
+            ...prev,
+            turn: {
+              ...prev.turn,
+              adaptive: payload.assistant_excerpt || prev.turn.adaptive,
+            },
+            llm: {
+              ...prev.llm,
+              model: payload.model || prev.llm.model,
+              note: `Adaptive completed in ${payload.duration_ms ?? '?'} ms`,
+            },
+          };
+        }
+
+        if (evt.event_type === 'llm.baseline_started') {
+          return {
+            ...prev,
+            llm: {
+              ...prev.llm,
+              note: `Baseline generation started (${formatPromptName(payload.prompt_id)})`,
+            },
+          };
+        }
+
+        if (evt.event_type === 'llm.baseline_completed') {
+          return {
+            ...prev,
+            turn: {
+              ...prev.turn,
+              baseline: payload.assistant_excerpt || prev.turn.baseline,
+            },
+            llm: {
+              ...prev.llm,
+              model: payload.model || prev.llm.model,
+              note: `Baseline completed in ${payload.duration_ms ?? '?'} ms`,
+            },
+          };
+        }
+
+        if (evt.event_type === 'turn.persisted') {
+          return {
+            ...prev,
+            id: `Conversation ${evt.conversation_id.slice(0, 8)} · Turn ${evt.turn_index}`,
+            turn: {
+              ...prev.turn,
+              flags: [
+                ...prev.turn.flags.filter((f) => f !== 'Turn persisted'),
+                'Turn persisted',
+              ],
+            },
+          };
+        }
+
+        if (evt.event_type === 'feedback.recorded') {
+          return {
+            ...prev,
+            turn: {
+              ...prev.turn,
+              flags: [
+                ...prev.turn.flags.filter((f) => f !== 'Feedback recorded'),
+                'Feedback recorded',
+              ],
+            },
+          };
+        }
+
+        if (evt.event_type === 'qscore.evaluated') {
+          return {
+            ...prev,
+            qscore: {
+              ...prev.qscore,
+              q: payload.q_total ?? prev.qscore.q,
+              reward: payload.q_total ?? prev.qscore.reward,
+              components: {
+                correctness: payload.q_correctness ?? prev.qscore.components.correctness,
+                clarity: payload.q_helpfulness ?? prev.qscore.components.clarity,
+                pedagogy: payload.q_pedagogy ?? prev.qscore.components.pedagogy,
+              },
+              rubric: ['Correctness', 'Helpfulness', 'Pedagogy'],
+            },
+          };
+        }
+
+        if (evt.event_type === 'bandit.reward_applied') {
+          return {
+            ...prev,
+            qscore: {
+              ...prev.qscore,
+              reward: payload.reward ?? prev.qscore.reward,
+            },
+          };
+        }
+
+        if (evt.event_type === 'bandit.arm_state_updated') {
+          const promptId = payload.prompt_id;
+          const nextCandidates = [...(prev.policies.candidates || [])];
+          const idx = nextCandidates.findIndex((c) => Number(c.prompt_id) === Number(promptId));
+          const nextMean = payload.posterior_mu ?? null;
+          const nextLambda = payload.posterior_lambda ?? null;
+
+          if (idx >= 0) {
+            nextCandidates[idx] = {
+              ...nextCandidates[idx],
+              mean_q: nextMean ?? nextCandidates[idx].mean_q,
+              posterior_lambda: nextLambda ?? nextCandidates[idx].posterior_lambda,
+            };
+          } else if (promptId != null) {
+            nextCandidates.push({
+              name: formatPromptName(promptId),
+              tag: Number(promptId) === Number(prev.turn?.prompts?.adaptive?.replace('Prompt #', ''))
+                ? 'Selected'
+                : 'Candidate',
+              mean_q: nextMean ?? 0,
+              posterior_lambda: nextLambda ?? null,
+              sampled_theta: 0,
+              prompt_id: promptId,
+            });
+          }
+
+          return {
+            ...prev,
+            bandit: {
+              ...prev.bandit,
+              learner_profile: [
+                `Prompt=${formatPromptName(payload.prompt_id)}`,
+                `eta=${(payload.eta ?? 0).toFixed(4)}`,
+                `nu=${(payload.nu ?? 0).toFixed(4)}`,
+                `n_eff=${(payload.effective_n ?? 0).toFixed(3)}`,
+              ],
+            },
+            policies: {
+              ...prev.policies,
+              candidates: nextCandidates,
+              note: `Updated posterior for ${formatPromptName(promptId)} from reward feedback.`,
+            },
+          };
+        }
+
+        return prev;
+      }
+
+      const Bar = ({ label, value, color, suffix }) => (
+        <div style={{ marginBottom: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#c7d4f2' }}>
+            <span>{label}</span>
+            <span className="mono">{suffix || `${Math.round((value || 0) * 100)}%`}</span>
+          </div>
+          <div style={{ height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+            <div style={{ width: `${Math.max(0, Math.min(100, (value || 0) * 100))}%`, height: '100%', background: color, borderRadius: 999 }} />
+          </div>
+        </div>
+      );
+
+      const DistributionCard = ({ candidate, index }) => {
+        const color = colorForPrompt(candidate.prompt_id, index);
+        const rawMu = Number(candidate.mean_q) || 0;
+        const mu = clamp(rawMu, 0, 1);
+        const lambda = Math.max(Number(candidate.posterior_lambda) || 0, 0);
+        const sigma = posteriorSigma(lambda);
+        const sampledTheta = Number(candidate.sampled_theta) || 0;
+        const ciLow = clamp(mu - 1.64 * sigma, 0, 1);
+        const ciHigh = clamp(mu + 1.64 * sigma, 0, 1);
+        const isSelected = candidate.tag === 'Selected';
+        const plotW = 220;
+        const plotH = 68;
+        const curve = buildPosteriorCurve(mu, sigma, plotW, plotH);
+        const { drawableW } = curve.geometry;
+        const muX = mu * drawableW;
+        const sampledX = clamp(sampledTheta, 0, 1) * drawableW;
+        const ciX = ciLow * drawableW;
+        const ciWidth = Math.max((ciHigh - ciLow) * drawableW, 2);
+        const gradId = `dist-grad-${candidate.prompt_id}-${index}`;
+
+        return (
+          <article className={`dist-card ${isSelected ? 'selected' : ''}`} style={{ '--dist-color': color }}>
+            <div className="dist-card-head">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="dist-dot" />
+                <div className="dist-card-title">{candidate.name}</div>
+              </div>
+              <span className="badge">{candidate.tag}</span>
+            </div>
+
+            <div className="dist-metrics">
+              <div className="dist-metric">
+                <div className="k mono">μ (posterior mean)</div>
+                <div className="v mono">{rawMu.toFixed(4)}</div>
+              </div>
+              <div className="dist-metric">
+                <div className="k mono">λ (precision)</div>
+                <div className="v mono">{lambda.toFixed(3)}</div>
+              </div>
+              <div className="dist-metric">
+                <div className="k mono">σ (uncertainty)</div>
+                <div className="v mono">{sigma.toFixed(4)}</div>
+              </div>
+              <div className="dist-metric">
+                <div className="k mono">sampled θ</div>
+                <div className="v mono">{sampledTheta.toFixed(4)}</div>
+              </div>
+            </div>
+
+            <div className="dist-plot-wrap">
+              <svg
+                viewBox={`0 0 ${plotW} ${plotH}`}
+                width="100%"
+                height="82"
+                preserveAspectRatio="none"
+                role="img"
+                aria-label={`Posterior distribution for ${candidate.name}`}
+              >
+                <defs>
+                  <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor={color} stopOpacity="0.08" />
+                    <stop offset="50%" stopColor={color} stopOpacity="0.32" />
+                    <stop offset="100%" stopColor={color} stopOpacity="0.08" />
+                  </linearGradient>
+                </defs>
+                <rect x={ciX.toFixed(2)} y="0" width={ciWidth.toFixed(2)} height={plotH} fill={`url(#${gradId})`} />
+                <path d={curve.path} fill="none" stroke={color} strokeWidth="2.1" strokeLinecap="round" />
+                <line x1={muX.toFixed(2)} x2={muX.toFixed(2)} y1="0" y2={plotH} stroke={color} strokeDasharray="4 4" strokeOpacity="0.9" />
+                <line x1={sampledX.toFixed(2)} x2={sampledX.toFixed(2)} y1="0" y2={plotH} stroke="#f8fafc" strokeDasharray="2 3" strokeOpacity="0.75" />
+              </svg>
+              <div className="dist-axis mono">
+                <span>0.00</span>
+                <span>0.50</span>
+                <span>1.00</span>
+              </div>
+            </div>
+          </article>
+        );
+      };
+
+      const DistributionPanel = ({ candidates }) => {
+        if (!candidates || !candidates.length) {
+          return (
+            <section className="dist-panel">
+              <div className="dist-head">
+                <div className="dist-title">
+                  <div className="dist-icon"><i className="fa-solid fa-wave-square"></i></div>
+                  <h2>Posterior Distribution State</h2>
+                </div>
+              </div>
+              <div className="dist-empty">
+                Waiting for <span className="mono">bandit.candidates_scored</span> events to render live posterior curves.
+              </div>
+            </section>
+          );
+        }
+
+        const ranked = [...candidates].sort((a, b) => {
+          if (a.tag === 'Selected' && b.tag !== 'Selected') return -1;
+          if (a.tag !== 'Selected' && b.tag === 'Selected') return 1;
+          return (Number(b.mean_q) || 0) - (Number(a.mean_q) || 0);
+        });
+        const winner = ranked[0];
+        const avgSigma = ranked.reduce(
+          (sum, item) => sum + posteriorSigma(item.posterior_lambda),
+          0
+        ) / ranked.length;
+
+        return (
+          <section className="dist-panel">
+            <div className="dist-head">
+              <div className="dist-title">
+                <div className="dist-icon"><i className="fa-solid fa-wave-square"></i></div>
+                <h2>Posterior Distribution State</h2>
+              </div>
+              <div className="dist-sub">
+                <span className="badge">Winner: {winner.name}</span>
+                <span className="badge mono">μ={Number(winner.mean_q || 0).toFixed(4)}</span>
+                <span className="badge mono">avg σ={avgSigma.toFixed(4)}</span>
+              </div>
+            </div>
+            <div className="dist-grid">
+              {ranked.map((candidate, i) => (
+                <DistributionCard key={`${candidate.prompt_id}-${i}`} candidate={candidate} index={i} />
+              ))}
+            </div>
+          </section>
+        );
+      };
+
+      const Edge = ({ id, d, labelD, color, active, label }) => (
+        <>
+          <path
+            d={d}
+            fill="none"
+            stroke={color}
+            strokeWidth="2"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+            className={`edge glow ${active ? 'active' : 'inactive'}`}
+          />
+          <path id={`label-${id}`} d={labelD || d} fill="none" stroke="none" />
+          <text className="edge-label" style={{ fill: color, opacity: active ? 1 : 0.35 }} filter="url(#label-blur)">
+            <textPath href={`#label-${id}`} startOffset="50%" textAnchor="middle">{label}</textPath>
+          </text>
+        </>
+      );
+
+      const Node = ({ node, snapshot, register, selected, setSelected, onMouseDown, hot }) => {
+        const common = {
+          ref: (el) => register(node.id, el),
+          className: 'node',
+          onMouseDown: (e) => onMouseDown(e, node.id),
+          onClick: () => setSelected(node.id),
+          style: {
+            left: `${node.x}%`,
+            top: `${node.y}%`,
+            transform: 'translate(-50%, -50%)',
+            borderColor: selected === node.id ? `${node.color}` : `${node.color}55`,
+            boxShadow: selected === node.id
+              ? `0 12px 40px ${node.color}66`
+              : hot
+                ? `0 0 0 2px ${node.color}88, 0 12px 40px ${node.color}66`
+                : `0 10px 30px ${node.color}33`,
+            cursor: 'grab',
+            userSelect: 'none',
+          },
+        };
+
+        const header = (iconClass, title) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <div style={{
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              background: `${node.color}22`,
+              display: 'grid',
+              placeItems: 'center',
+              color: node.color,
+              fontSize: 14,
+              boxShadow: `0 0 0 1px ${node.color}33`
+            }}>
+              <i className={iconClass}></i>
+            </div>
+            <h3 style={{ color: node.color, margin: 0 }}>{title}</h3>
+          </div>
+        );
+
+        if (node.id === 'student') {
+          return (
+            <div {...common}>
+              {header('fa-solid fa-user-graduate', 'Student')}
+              <div className="body" style={{ marginBottom: 8 }}>{snapshot.turn.question}</div>
+              <div className="badge">Learner: {snapshot.student.id}</div>
+              <div className="badge">State: {snapshot.student.persona}</div>
+            </div>
+          );
+        }
+
+        if (node.id === 'bandit') {
+          return (
+            <div {...common}>
+              {header('fa-solid fa-crosshairs', 'Policy Selector')}
+              <div className="body" style={{ marginBottom: 8 }}>
+                {snapshot.policy.current}
+              </div>
+              {snapshot.policy.reason?.map((r) => (
+                <div key={r} className="badge" style={{ marginBottom: 6 }}>{r}</div>
+              ))}
+              <div style={{ marginBottom: 6, fontSize: 12, color: '#c7d4f2' }}>Traffic estimate</div>
+              {(snapshot.bandit.traffic || []).slice(0, 4).map((t) => (
+                <Bar key={t.name} label={t.name} value={t.share} color={node.color} />
+              ))}
+            </div>
+          );
+        }
+
+        if (node.id === 'policies') {
+          return (
+            <div {...common} style={{ ...common.style, maxWidth: 250 }}>
+              {header('fa-solid fa-diagram-project', 'Available Policies')}
+              {snapshot.policies.candidates?.length ? (
+                <div style={{ display: 'grid', gap: 6 }}>
+                  {snapshot.policies.candidates.slice(0, 6).map((c) => (
+                    <div key={`${c.prompt_id}-${c.sampled_theta}`} className="badge" style={{ justifyContent: 'space-between', width: '100%', gap: 10 }}>
+                      <span>{c.name} · {c.tag}</span>
+                      <span className="mono" style={{ whiteSpace: 'nowrap' }}>μ {Number(c.mean_q || 0).toFixed(4)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="body">{snapshot.policies.note}</div>
+              )}
+            </div>
+          );
+        }
+
+        if (node.id === 'static_policy') {
+          return (
+            <div {...common}>
+              {header('fa-solid fa-shield-halved', 'Control Prompt')}
+              <div className="badge">{snapshot.static_policy.name}</div>
+            </div>
+          );
+        }
+
+        if (node.id === 'adaptive') {
+          return (
+            <div {...common} style={{ ...common.style, maxWidth: 320 }}>
+              {header('fa-solid fa-robot', 'Adaptive Tutor')}
+              <div className="badge">Policy: {snapshot.turn.prompts.adaptive}</div>
+              <div className="body" style={{ margin: '6px 0' }}>{snapshot.turn.adaptive}</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {(snapshot.turn.flags || []).map((f) => (
+                  <span className="badge" key={f}>{f}</span>
+                ))}
+              </div>
+            </div>
+          );
+        }
+
+        if (node.id === 'baseline') {
+          return (
+            <div {...common} style={{ ...common.style, maxWidth: 300 }}>
+              {header('fa-regular fa-file-lines', 'Baseline Tutor')}
+              <div className="badge">Policy: {snapshot.turn.prompts.baseline}</div>
+              <div className="body" style={{ marginTop: 6 }}>{snapshot.turn.baseline}</div>
+            </div>
+          );
+        }
+
+        if (node.id === 'llm') {
+          return (
+            <div {...common} style={{ ...common.style, maxWidth: 260 }}>
+              {header('fa-solid fa-microchip', 'Language Model')}
+              <div className="body">Model: {snapshot.llm.model}</div>
+              <div className="body" style={{ marginTop: 6 }}>{snapshot.llm.note}</div>
+            </div>
+          );
+        }
+
+        if (node.id === 'qscore') {
+          const c = snapshot.qscore.components;
+          return (
+            <div {...common} style={{ ...common.style, maxWidth: 280 }}>
+              {header('fa-solid fa-gauge', 'Q-score Evaluator')}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                <div className="badge">Q {snapshot.qscore.q == null ? '—' : Number(snapshot.qscore.q).toFixed(2)}</div>
+                <div className="badge">Reward {snapshot.qscore.reward == null ? '—' : Number(snapshot.qscore.reward).toFixed(2)}</div>
+              </div>
+              <Bar label="Correctness" value={c.correctness || 0} color="#67E8F9" suffix={c.correctness == null ? '—' : `${Math.round(c.correctness * 100)}%`} />
+              <Bar label="Clarity" value={c.clarity || 0} color="#7dd3fc" suffix={c.clarity == null ? '—' : `${Math.round(c.clarity * 100)}%`} />
+              <Bar label="Pedagogy" value={c.pedagogy || 0} color="#38bdf8" suffix={c.pedagogy == null ? '—' : `${Math.round(c.pedagogy * 100)}%`} />
+            </div>
+          );
+        }
+
+        return null;
+      };
+
+      function App() {
+        const conversationId = React.useMemo(() => getConversationId(), []);
+        const [snapshot, setSnapshot] = React.useState(() => makeEmptySnapshot(conversationId || 'missing'));
+        const [connectionState, setConnectionState] = React.useState('idle');
+        const [lastEventAt, setLastEventAt] = React.useState(null);
+        const [replayCount, setReplayCount] = React.useState(0);
+        const [errorLine, setErrorLine] = React.useState('');
+
+        const [nodesState, setNodesState] = React.useState(layout.nodes);
+        const [showCoords, setShowCoords] = React.useState(false);
+        const [selected, setSelected] = React.useState(null);
+
+        const [hotNodes, setHotNodes] = React.useState({});
+        const [hotEdges, setHotEdges] = React.useState({});
+
+        const stageRef = React.useRef(null);
+        const nodeElsRef = React.useRef({});
+        const [rects, setRects] = React.useState({});
+        const [paths, setPaths] = React.useState([]);
+
+        const register = React.useCallback((id, el) => {
+          if (el) nodeElsRef.current[id] = el;
+          else delete nodeElsRef.current[id];
+        }, []);
+
+        const activateEvent = React.useCallback((evt) => {
+          const now = Date.now();
+          const until = now + hotMs;
+          if (evt.node) {
+            setHotNodes((prev) => ({ ...prev, [evt.node]: until }));
+          }
+          if (evt.edge && evt.edge.from && evt.edge.to) {
+            const key = `${evt.edge.from}-${evt.edge.to}`;
+            setHotEdges((prev) => ({ ...prev, [key]: until }));
+          }
+        }, []);
+
+        React.useEffect(() => {
+          const id = setInterval(() => {
+            const now = Date.now();
+            setHotNodes((prev) => {
+              const next = {};
+              Object.entries(prev).forEach(([k, v]) => {
+                if (v > now) next[k] = v;
+              });
+              return next;
+            });
+            setHotEdges((prev) => {
+              const next = {};
+              Object.entries(prev).forEach(([k, v]) => {
+                if (v > now) next[k] = v;
+              });
+              return next;
+            });
+          }, 350);
+          return () => clearInterval(id);
+        }, []);
+
+        React.useEffect(() => {
+          if (!conversationId) {
+            return;
+          }
+
+          const source = new EventSource(`/events?conversation_id=${encodeURIComponent(conversationId)}`);
+          setConnectionState('connecting');
+
+          source.onopen = () => {
+            setConnectionState('connected');
+            setErrorLine('');
+          };
+
+          source.addEventListener('ready', (event) => {
+            try {
+              const payload = JSON.parse(event.data || '{}');
+              setReplayCount(payload.replay_count || 0);
+            } catch (_) {}
+          });
+
+          source.addEventListener('state', (event) => {
+            try {
+              const payload = JSON.parse(event.data || '{}');
+              setLastEventAt(payload.occurred_at || new Date().toISOString());
+              if (payload.event_type === 'pipeline.error') {
+                setErrorLine(`${payload.payload?.stage || 'pipeline'}: ${payload.payload?.detail || 'error'}`);
+              }
+              activateEvent(payload);
+              setSnapshot((prev) => applyEvent(prev, payload));
+            } catch (err) {
+              setErrorLine(`Failed to parse event: ${err.message}`);
+            }
+          });
+
+          source.addEventListener('error', (event) => {
+            try {
+              if (event?.data) {
+                const payload = JSON.parse(event.data);
+                if (payload.detail) {
+                  setErrorLine(payload.detail);
+                }
+              }
+            } catch (_) {}
+          });
+
+          source.onerror = () => {
+            setConnectionState('disconnected');
+          };
+
+          return () => source.close();
+        }, [conversationId, activateEvent]);
+
+        const dragRef = React.useRef({ active: false, id: null, offsetX: 0, offsetY: 0 });
+
+        const onMouseDown = React.useCallback((e, id) => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+          setSelected(id);
+
+          const stageEl = stageRef.current;
+          if (!stageEl) return;
+          const stageRect = stageEl.getBoundingClientRect();
+          const n = nodesState.find((x) => x.id === id);
+          if (!n) return;
+
+          const mouseXpct = ((e.clientX - stageRect.left) / stageRect.width) * 100;
+          const mouseYpct = ((e.clientY - stageRect.top) / stageRect.height) * 100;
+
+          dragRef.current.active = true;
+          dragRef.current.id = id;
+          dragRef.current.offsetX = n.x - mouseXpct;
+          dragRef.current.offsetY = n.y - mouseYpct;
+
+          window.addEventListener('mousemove', onMouseMove);
+          window.addEventListener('mouseup', onMouseUp);
+        }, [nodesState]);
+
+        const onMouseMove = React.useCallback((e) => {
+          if (!dragRef.current.active) return;
+          const stageEl = stageRef.current;
+          if (!stageEl) return;
+          const stageRect = stageEl.getBoundingClientRect();
+
+          let x = ((e.clientX - stageRect.left) / stageRect.width) * 100 + dragRef.current.offsetX;
+          let y = ((e.clientY - stageRect.top) / stageRect.height) * 100 + dragRef.current.offsetY;
+          x = clamp(x, 6, 94);
+          y = clamp(y, 8, 92);
+
+          const id = dragRef.current.id;
+          setNodesState((prev) => prev.map((n) => (n.id === id ? { ...n, x, y } : n)));
+        }, []);
+
+        const onMouseUp = React.useCallback(() => {
+          dragRef.current.active = false;
+          dragRef.current.id = null;
+          window.removeEventListener('mousemove', onMouseMove);
+          window.removeEventListener('mouseup', onMouseUp);
+        }, [onMouseMove]);
+
+        const onStageClick = () => setSelected(null);
+
+        const measure = React.useCallback(() => {
+          const stageEl = stageRef.current;
+          if (!stageEl) return;
+          const stageRect = stageEl.getBoundingClientRect();
+          const nextRects = {};
+
+          for (const n of nodesState) {
+            const el = nodeElsRef.current[n.id];
+            if (!el) continue;
+            const r = el.getBoundingClientRect();
+            nextRects[n.id] = {
+              x: r.left - stageRect.left,
+              y: r.top - stageRect.top,
+              width: r.width,
+              height: r.height,
+            };
+          }
+          setRects(nextRects);
+        }, [nodesState]);
+
+        React.useLayoutEffect(() => {
+          measure();
+          const raf = requestAnimationFrame(measure);
+          return () => cancelAnimationFrame(raf);
+        }, [nodesState, measure]);
+
+        React.useEffect(() => {
+          const stageEl = stageRef.current;
+          if (!stageEl) return;
+
+          let rafId = null;
+          const schedule = () => {
+            if (rafId) cancelAnimationFrame(rafId);
+            rafId = requestAnimationFrame(measure);
+          };
+
+          window.addEventListener('resize', schedule);
+          const ro = new ResizeObserver(schedule);
+          ro.observe(stageEl);
+          Object.values(nodeElsRef.current).forEach((el) => el && ro.observe(el));
+
+          if (document.fonts && document.fonts.ready) {
+            document.fonts.ready.then(schedule).catch(() => {});
+          }
+
+          return () => {
+            window.removeEventListener('resize', schedule);
+            ro.disconnect();
+            if (rafId) cancelAnimationFrame(rafId);
+          };
+        }, [measure]);
+
+        const computePaths = React.useCallback(() => {
+          const nextPaths = [];
+          layout.edges.forEach((e, idx) => {
+            const a = rects[e.from];
+            const b = rects[e.to];
+            if (!a || !b) return;
+            const { from, to } = pickPort(a, b);
+            nextPaths.push({
+              key: `${e.from}-${e.to}`,
+              d: bezierPath(from, to),
+              labelD: labelPath(from, to),
+              color: e.color,
+              label: e.label,
+              order: idx,
+            });
+          });
+          setPaths(nextPaths);
+        }, [rects]);
+
+        React.useEffect(() => {
+          computePaths();
+        }, [computePaths]);
+
+        if (!conversationId) {
+          return (
+            <div className="missing">
+              <div className="missing-card">
+                <h1>Ninja Panel Requires Conversation Scope</h1>
+                <p className="muted" style={{ marginTop: 10 }}>
+                  Open the panel with a conversation query parameter:
+                </p>
+                <pre className="mono" style={{ whiteSpace: 'pre-wrap' }}>/panel/?conversation_id=&lt;uuid&gt;</pre>
+                <p className="muted">The live stream is intentionally conversation-scoped in v1.</p>
+              </div>
+            </div>
+          );
+        }
+
+        const statusColor = connectionState === 'connected'
+          ? '#8be7c7'
+          : connectionState === 'connecting'
+            ? '#ffd273'
+            : '#ff9b9b';
+
+        return (
+          <div className="shell">
+            <div className="topbar">
+              <div>
+                <div className="muted">Adaptive Tutor Layer · Ninja Panel</div>
+                <h1>{snapshot.id}</h1>
+                <div className="status-row">
+                  <span className="badge"><span style={{ color: statusColor }}>●</span> {connectionState}</span>
+                  <span className="badge mono">conversation_id={conversationId}</span>
+                  <span className="badge mono">replay={replayCount}</span>
+                  <span className="badge mono">last={lastEventAt ? new Date(lastEventAt).toLocaleTimeString() : '—'}</span>
+                </div>
+                {errorLine ? <div className="error-line mono">{errorLine}</div> : null}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn" onClick={() => setShowCoords((v) => !v)}>
+                  {showCoords ? 'Hide positions' : 'Show positions'}
+                </button>
+              </div>
+            </div>
+
+            <div className="canvas">
+              <div className="stage" ref={stageRef} onMouseDown={onStageClick}>
+                <svg className="paths" width="100%" height="100%">
+                  <defs>
+                    <filter id="label-blur" x="-20%" y="-20%" width="140%" height="140%">
+                      <feGaussianBlur in="SourceGraphic" stdDeviation="2.6" result="blur" />
+                      <feMerge>
+                        <feMergeNode in="blur" />
+                        <feMergeNode in="SourceGraphic" />
+                      </feMerge>
+                    </filter>
+                  </defs>
+                  {paths.map((p, idx) => (
+                    <Edge
+                      key={p.key}
+                      id={`edge-${idx}`}
+                      d={p.d}
+                      labelD={p.labelD}
+                      color={p.color}
+                      active={Boolean(hotEdges[p.key])}
+                      label={p.label}
+                    />
+                  ))}
+                </svg>
+
+                <div className="nodes-layer">
+                  {nodesState.map((node) => (
+                    <Node
+                      key={node.id}
+                      node={node}
+                      snapshot={snapshot}
+                      register={register}
+                      selected={selected}
+                      setSelected={setSelected}
+                      onMouseDown={onMouseDown}
+                      hot={Boolean(hotNodes[node.id])}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+            <DistributionPanel candidates={snapshot.policies.candidates || []} />
+
+            {showCoords && (
+              <div className="modal-backdrop" onMouseDown={() => setShowCoords(false)}>
+                <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <h4>Node positions</h4>
+                    <button className="btn" onClick={() => setShowCoords(false)} style={{ padding: '6px 10px', fontSize: 12 }}>
+                      Close
+                    </button>
+                  </div>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>X (%)</th>
+                        <th>Y (%)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {nodesState.map((n) => (
+                        <tr key={n.id}>
+                          <td>{n.label}</td>
+                          <td className="mono">{n.x.toFixed(1)}</td>
+                          <td className="mono">{n.y.toFixed(1)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+  </body>
+</html>

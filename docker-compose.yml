@@ -1,0 +1,40 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+
+  api:
+    build: .
+    depends_on:
+      - redis
+    ports:
+      - '8000:8000'
+    environment:
+      OBSERVABILITY_MODE: 'true'
+      OBS_EVENTS_STRICT: 'true'
+      OBS_REDIS_URL: 'redis://redis:6379/0'
+      OBS_REDIS_STREAM_KEY: 'atl:state-events'
+      OBS_REDIS_MAXLEN: '2000'
+      NINJA_PANEL_URL: 'http://localhost:3001'
+      BASELINE_PROMPT_ID: '1'
+      LLM_API_URL: ${LLM_API_URL:-https://api.x.ai/v1/chat/completions}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-15}
+      LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-grok-4-1-fast-non-reasoning}
+      LLM_DEFAULT_TEMPERATURE: ${LLM_DEFAULT_TEMPERATURE:-0.7}
+      LLM_DEFAULT_MAX_TOKENS: ${LLM_DEFAULT_MAX_TOKENS:-512}
+    volumes:
+      - ./src/db.sqlite3:/app/src/db.sqlite3
+
+  panel:
+    build:
+      context: ./panel-service
+    depends_on:
+      - redis
+    ports:
+      - '3001:3001'
+    environment:
+      OBS_REDIS_URL: 'redis://redis:6379/0'
+      OBS_REDIS_STREAM_KEY: 'atl:state-events'
+      PANEL_REPLAY_LIMIT: '100'

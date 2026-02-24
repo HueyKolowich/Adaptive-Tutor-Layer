@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -29,6 +31,39 @@ class BanditParams:
     lambda0: float = DEFAULT_LAMBDA0
     sigma_r: float = DEFAULT_SIGMA_R
     model_version: str = DEFAULT_MODEL_VERSION
+
+
+@dataclass(frozen=True)
+class PromptCandidateTrace:
+    prompt_id: int
+    sampled_theta: float
+    posterior_mu: float
+    posterior_lambda: float
+    selected: bool
+
+    def as_dict(self) -> dict:
+        return {
+            'prompt_id': self.prompt_id,
+            'sampled_theta': self.sampled_theta,
+            'posterior_mu': self.posterior_mu,
+            'posterior_lambda': self.posterior_lambda,
+            'selected': self.selected,
+        }
+
+
+@dataclass(frozen=True)
+class PromptSelectionTrace:
+    turn_number: int
+    selected_prompt_id: int
+    selected_sampled_theta: float
+    guardrail_applied: bool
+    candidates: list[PromptCandidateTrace]
+
+
+@dataclass(frozen=True)
+class PromptSelectionResult:
+    system_prompt: SystemPrompt
+    trace: PromptSelectionTrace
 
 
 def _get_setting(name: str, default):
@@ -65,6 +100,9 @@ class PromptService:
         self.params = params
 
     def select_system_prompt(self, context: PromptContext) -> SystemPrompt:
+        return self.select_system_prompt_with_trace(context).system_prompt
+
+    def select_system_prompt_with_trace(self, context: PromptContext) -> PromptSelectionResult:
         if context.conversation_id is None:
             raise PromptDataError("conversation_id required for bandit selection")
 
@@ -83,6 +121,7 @@ class PromptService:
         best_prompt = None
         best_sample = float('-inf')
         sampled_by_prompt: dict[int, float] = {}
+        posterior_by_prompt: dict[int, tuple[float, float]] = {}
         rng = np.random.default_rng()
 
         for prompt in eligible:
@@ -90,6 +129,7 @@ class PromptService:
             mu, lam = _posterior_params(state)
             sampled_theta = float(rng.normal(mu, np.sqrt((state.alpha**2) / lam)))
             sampled_by_prompt[prompt.id] = sampled_theta
+            posterior_by_prompt[prompt.id] = (float(mu), float(lam))
             if sampled_theta > best_sample:
                 best_sample = sampled_theta
                 best_prompt = prompt
@@ -98,7 +138,9 @@ class PromptService:
             best_prompt = fallback_prompt
             best_sample = sampled_by_prompt.get(best_prompt.id, 0.0)
 
+        guardrail_applied = False
         if self._streak_guardrails(context.conversation_id, best_prompt.id):
+            guardrail_applied = True
             best_prompt = fallback_prompt
             best_sample = sampled_by_prompt.get(best_prompt.id, best_sample)
 
@@ -110,7 +152,29 @@ class PromptService:
             sampled_theta=best_sample,
         )
 
-        return SystemPrompt(prompt_id=best_prompt.id, text=best_prompt.text)
+        candidates = []
+        for prompt in eligible:
+            mu, lam = posterior_by_prompt[prompt.id]
+            candidates.append(
+                PromptCandidateTrace(
+                    prompt_id=prompt.id,
+                    sampled_theta=float(sampled_by_prompt[prompt.id]),
+                    posterior_mu=float(mu),
+                    posterior_lambda=float(lam),
+                    selected=prompt.id == best_prompt.id,
+                )
+            )
+
+        return PromptSelectionResult(
+            system_prompt=SystemPrompt(prompt_id=best_prompt.id, text=best_prompt.text),
+            trace=PromptSelectionTrace(
+                turn_number=turn_number,
+                selected_prompt_id=best_prompt.id,
+                selected_sampled_theta=float(best_sample),
+                guardrail_applied=guardrail_applied,
+                candidates=candidates,
+            ),
+        )
 
     def _streak_guardrails(self, conversation_id: str, prompt_id: int) -> bool:
         recent = list(
@@ -180,25 +244,52 @@ class PromptService:
 
     @transaction.atomic
     def apply_reward_for_turn(self, turn: Turn) -> int:
-        decisions = PromptDecision.objects.select_for_update().filter(
-            turn=turn, reward__isnull=True
-        ).select_related('prompt')
-        if not decisions.exists():
-            return 0
+        updates = self.apply_reward_for_turn_with_updates(turn)
+        return len(updates)
+
+    @transaction.atomic
+    def apply_reward_for_turn_with_updates(self, turn: Turn) -> list[dict]:
+        decisions = list(
+            PromptDecision.objects.select_for_update()
+            .filter(turn=turn, reward__isnull=True)
+            .select_related('prompt')
+        )
+        if not decisions:
+            return []
 
         evaluations = TurnEvaluation.objects.filter(turn=turn)
         scores = [ev.q_total for ev in evaluations]
         if not scores:
-            return 0
+            return []
         reward = float(sum(scores) / len(scores))
 
+        updates = []
         for decision in decisions:
-            applied_reward = self._apply_reward(decision.learner_id, decision.prompt, reward)
+            applied_reward, state_snapshot = self._apply_reward(
+                decision.learner_id,
+                decision.prompt,
+                reward,
+                include_state=True,
+            )
             decision.reward = applied_reward
             decision.reward_computed_at = timezone.now()
             decision.reward_version = 'mean_q_v0'
             decision.save(update_fields=['reward', 'reward_computed_at', 'reward_version'])
-        return decisions.count()
+            updates.append(
+                {
+                    'decision_id': decision.id,
+                    'learner_id': decision.learner_id,
+                    'prompt_id': decision.prompt_id,
+                    'reward': applied_reward,
+                    'eta': state_snapshot['eta'],
+                    'nu': state_snapshot['nu'],
+                    'effective_n': state_snapshot['effective_n'],
+                    'model_version': state_snapshot['model_version'],
+                    'posterior_mu': state_snapshot['posterior_mu'],
+                    'posterior_lambda': state_snapshot['posterior_lambda'],
+                }
+            )
+        return updates
 
     def _fetch_reward(self, decision: PromptDecision) -> float | None:
         if decision.turn_id is None:
@@ -209,7 +300,13 @@ class PromptService:
             return None
         return float(sum(scores) / len(scores))
 
-    def _apply_reward(self, learner_id: str, prompt: Prompt, reward: float) -> float:
+    def _apply_reward(
+        self,
+        learner_id: str,
+        prompt: Prompt,
+        reward: float,
+        include_state: bool = False,
+    ) -> float | tuple[float, dict]:
         params = self.params
         clipped_reward = _clip_reward(reward)
 
@@ -238,5 +335,17 @@ class PromptService:
             state.nu = gamma * float(state.nu) + tau_r
             state.effective_n = gamma * float(state.effective_n) + 1.0
             state.save(update_fields=['eta', 'nu', 'effective_n', 'updated_at'])
+
+        if include_state:
+            posterior_lambda = max(float(state.lambda0 + state.nu), 1e-12)
+            posterior_mu = ((float(state.lambda0) * float(state.mu0)) + float(state.eta)) / posterior_lambda
+            return clipped_reward, {
+                'eta': float(state.eta),
+                'nu': float(state.nu),
+                'effective_n': float(state.effective_n),
+                'model_version': state.model_version,
+                'posterior_mu': float(posterior_mu),
+                'posterior_lambda': float(posterior_lambda),
+            }
 
         return clipped_reward

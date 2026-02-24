@@ -27,6 +27,22 @@ class PromptServiceSelectionTests(TestCase):
         self.assertIsNotNone(decision.sampled_theta)
         self.assertEqual(decision.model_version, 'pts_normal_v1')
 
+    def test_selection_trace_includes_candidates_and_selected_prompt(self):
+        Prompt.objects.create(text="Prompt A", is_active=True)
+        Prompt.objects.create(text="Prompt B", is_active=True)
+        service = PromptService()
+        conversation_id = str(uuid.uuid4())
+
+        result = service.select_system_prompt_with_trace(
+            PromptContext(user_id='learner-1', conversation_id=conversation_id)
+        )
+
+        self.assertEqual(len(result.trace.candidates), 2)
+        selected = [c for c in result.trace.candidates if c.selected]
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0].prompt_id, result.trace.selected_prompt_id)
+        self.assertEqual(result.system_prompt.prompt_id, result.trace.selected_prompt_id)
+
     def test_streak_guardrail_uses_fallback_prompt(self):
         older_prompt = Prompt.objects.create(text="Older", is_active=True)
         fallback_prompt = Prompt.objects.create(text="Fallback", is_active=True)
