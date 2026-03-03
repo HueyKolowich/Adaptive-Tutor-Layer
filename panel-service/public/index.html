@@ -397,6 +397,8 @@
           { id: 'adaptive', label: 'Adaptive Tutor', color: '#2DD4BF', x: 85.5, y: 64.9 },
           { id: 'baseline', label: 'Baseline Tutor', color: '#FBBF24', x: 85.1, y: 23.3 },
           { id: 'qscore', label: 'Q-score Evaluator', color: '#67E8F9', x: 54.2, y: 73.3 },
+          { id: 'drift', label: 'Drift Monitor', color: '#A78BFA', x: 52.8, y: 89.2 },
+          { id: 'ga', label: 'GA Evolution', color: '#F97316', x: 72.1, y: 88.1 },
           { id: 'llm', label: 'Language Model', color: '#F472B6', x: 57.9, y: 29.4 },
         ],
         edges: [
@@ -410,6 +412,9 @@
           { from: 'adaptive', to: 'qscore', color: '#67E8F9', label: 'Score adaptive' },
           { from: 'qscore', to: 'policies', color: '#67E8F9', label: 'Reward update' },
           { from: 'qscore', to: 'bandit', color: '#34D399', label: 'Arm state update' },
+          { from: 'qscore', to: 'drift', color: '#A78BFA', label: 'Per-user drift inputs' },
+          { from: 'drift', to: 'ga', color: '#F97316', label: 'Trigger evolution' },
+          { from: 'ga', to: 'policies', color: '#F97316', label: 'Private candidates' },
         ],
       };
 
@@ -458,11 +463,19 @@
         return (params.get('conversation_id') || '').trim();
       }
 
-      function makeEmptySnapshot(conversationId) {
+      function getUserId() {
+        const params = new URLSearchParams(window.location.search);
+        return (params.get('user_id') || '').trim();
+      }
+
+      function makeEmptySnapshot({ conversationId, userId }) {
+        const scopeLabel = userId
+          ? `User ${userId} · Live`
+          : `Conversation ${(conversationId || 'missing').slice(0, 8)} · Live`;
         return {
-          id: `Conversation ${conversationId.slice(0, 8)} · Live`,
+          id: scopeLabel,
           student: {
-            id: 'unknown',
+            id: userId || 'unknown',
             persona: 'Waiting for events',
             topic: 'Unknown',
           },
@@ -507,6 +520,19 @@
               pedagogy: null,
             },
             rubric: [],
+          },
+          drift: {
+            run_id: null,
+            high_severity: false,
+            breached_count: 0,
+            last_signal: '(waiting)',
+            note: 'Awaiting drift cycle events.',
+          },
+          ga: {
+            parent_prompt_id: null,
+            generated: 0,
+            promoted_prompt_id: null,
+            note: 'Awaiting GA events.',
           },
         };
       }
@@ -722,9 +748,10 @@
         }
 
         if (evt.event_type === 'turn.persisted') {
+          const conversationLabel = (evt.conversation_id || 'unknown').slice(0, 8);
           return {
             ...prev,
-            id: `Conversation ${evt.conversation_id.slice(0, 8)} · Turn ${evt.turn_index}`,
+            id: `Conversation ${conversationLabel} · Turn ${evt.turn_index}`,
             turn: {
               ...prev.turn,
               flags: [
@@ -816,6 +843,72 @@
               ...prev.policies,
               candidates: nextCandidates,
               note: `Updated posterior for ${formatPromptName(promptId)} from reward feedback.`,
+            },
+          };
+        }
+
+        if (evt.event_type === 'drift.signal_detected') {
+          return {
+            ...prev,
+            drift: {
+              ...prev.drift,
+              run_id: payload.drift_run_id ?? prev.drift.run_id,
+              last_signal: `${payload.signal_type || 'signal'} · ${payload.severity || 'low'}`,
+              note: `score=${Number(payload.score ?? 0).toFixed(4)} threshold=${Number(payload.threshold ?? 0).toFixed(4)}`,
+            },
+          };
+        }
+
+        if (evt.event_type === 'drift.run_completed') {
+          return {
+            ...prev,
+            drift: {
+              ...prev.drift,
+              run_id: payload.drift_run_id ?? prev.drift.run_id,
+              high_severity: Boolean(payload.high_severity),
+              breached_count: Number(payload.breached_count ?? 0),
+              note: payload.ga_triggered
+                ? 'High severity sustained. GA triggered.'
+                : 'Run completed without GA trigger.',
+            },
+          };
+        }
+
+        if (evt.event_type === 'drift.ga_triggered') {
+          return {
+            ...prev,
+            drift: {
+              ...prev.drift,
+              run_id: payload.drift_run_id ?? prev.drift.run_id,
+              note: `Triggered GA from ${formatPromptName(payload.parent_prompt_id)} with ${payload.variants_generated ?? 0} variants.`,
+            },
+            ga: {
+              ...prev.ga,
+              parent_prompt_id: payload.parent_prompt_id ?? prev.ga.parent_prompt_id,
+              generated: payload.variants_generated ?? prev.ga.generated,
+            },
+          };
+        }
+
+        if (evt.event_type === 'ga.variants_generated') {
+          return {
+            ...prev,
+            ga: {
+              ...prev.ga,
+              parent_prompt_id: payload.parent_prompt_id ?? prev.ga.parent_prompt_id,
+              generated: payload.published_count ?? payload.generated_count ?? prev.ga.generated,
+              note: `Generated=${payload.generated_count ?? 0}, published=${payload.published_count ?? 0}.`,
+            },
+          };
+        }
+
+        if (evt.event_type === 'ga.prompt_promoted') {
+          return {
+            ...prev,
+            ga: {
+              ...prev.ga,
+              promoted_prompt_id: payload.prompt_id ?? prev.ga.promoted_prompt_id,
+              note: `Promoted ${formatPromptName(payload.prompt_id)} for ${payload.subject_user_id || evt.user_id || 'user'}.`,
             },
           };
         }
@@ -1132,12 +1225,40 @@
           );
         }
 
+        if (node.id === 'drift') {
+          return (
+            <div {...common} style={{ ...common.style, maxWidth: 290 }}>
+              {header('fa-solid fa-arrows-left-right-to-line', 'Drift Monitor')}
+              <div className="badge">Run #{snapshot.drift.run_id ?? '—'}</div>
+              <div className="badge">{snapshot.drift.high_severity ? 'High severity' : 'Stable/medium'}</div>
+              <div className="badge">Breaches: {snapshot.drift.breached_count ?? 0}</div>
+              <div className="body" style={{ marginTop: 6 }}>{snapshot.drift.last_signal}</div>
+              <div className="body" style={{ marginTop: 6 }}>{snapshot.drift.note}</div>
+            </div>
+          );
+        }
+
+        if (node.id === 'ga') {
+          return (
+            <div {...common} style={{ ...common.style, maxWidth: 290 }}>
+              {header('fa-solid fa-dna', 'GA Evolution')}
+              <div className="badge">Parent: {formatPromptName(snapshot.ga.parent_prompt_id)}</div>
+              <div className="badge">Published: {snapshot.ga.generated ?? 0}</div>
+              <div className="badge">Promoted: {formatPromptName(snapshot.ga.promoted_prompt_id)}</div>
+              <div className="body" style={{ marginTop: 6 }}>{snapshot.ga.note}</div>
+            </div>
+          );
+        }
+
         return null;
       };
 
       function App() {
         const conversationId = React.useMemo(() => getConversationId(), []);
-        const [snapshot, setSnapshot] = React.useState(() => makeEmptySnapshot(conversationId || 'missing'));
+        const userId = React.useMemo(() => getUserId(), []);
+        const [snapshot, setSnapshot] = React.useState(
+          () => makeEmptySnapshot({ conversationId, userId })
+        );
         const [connectionState, setConnectionState] = React.useState('idle');
         const [lastEventAt, setLastEventAt] = React.useState(null);
         const [replayCount, setReplayCount] = React.useState(0);
@@ -1194,11 +1315,14 @@
         }, []);
 
         React.useEffect(() => {
-          if (!conversationId) {
+          if (!conversationId && !userId) {
             return;
           }
 
-          const source = new EventSource(`/events?conversation_id=${encodeURIComponent(conversationId)}`);
+          const params = new URLSearchParams();
+          if (conversationId) params.set('conversation_id', conversationId);
+          if (userId) params.set('user_id', userId);
+          const source = new EventSource(`/events?${params.toString()}`);
           setConnectionState('connecting');
 
           source.onopen = () => {
@@ -1243,7 +1367,7 @@
           };
 
           return () => source.close();
-        }, [conversationId, activateEvent]);
+        }, [conversationId, userId, activateEvent]);
 
         const dragRef = React.useRef({ active: false, id: null, offsetX: 0, offsetY: 0 });
 
@@ -1370,16 +1494,16 @@
           computePaths();
         }, [computePaths]);
 
-        if (!conversationId) {
+        if (!conversationId && !userId) {
           return (
             <div className="missing">
               <div className="missing-card">
-                <h1>Ninja Panel Requires Conversation Scope</h1>
+                <h1>Ninja Panel Requires Scope</h1>
                 <p className="muted" style={{ marginTop: 10 }}>
-                  Open the panel with a conversation query parameter:
+                  Open the panel with a scope query parameter:
                 </p>
-                <pre className="mono" style={{ whiteSpace: 'pre-wrap' }}>/panel/?conversation_id=&lt;uuid&gt;</pre>
-                <p className="muted">The live stream is intentionally conversation-scoped in v1.</p>
+                <pre className="mono" style={{ whiteSpace: 'pre-wrap' }}>/panel/?conversation_id=&lt;uuid&gt; or /panel/?user_id=&lt;learner&gt;</pre>
+                <p className="muted">Conversation and user scopes are both supported.</p>
               </div>
             </div>
           );
@@ -1399,7 +1523,8 @@
                 <h1>{snapshot.id}</h1>
                 <div className="status-row">
                   <span className="badge"><span style={{ color: statusColor }}>●</span> {connectionState}</span>
-                  <span className="badge mono">conversation_id={conversationId}</span>
+                  {conversationId ? <span className="badge mono">conversation_id={conversationId}</span> : null}
+                  {userId ? <span className="badge mono">user_id={userId}</span> : null}
                   <span className="badge mono">replay={replayCount}</span>
                   <span className="badge mono">last={lastEventAt ? new Date(lastEventAt).toLocaleTimeString() : '—'}</span>
                 </div>

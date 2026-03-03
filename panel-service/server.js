@@ -56,7 +56,20 @@ function previousStreamId(id) {
   return `${ms - 1}-18446744073709551615`;
 }
 
-async function fetchReplayEvents(client, conversationId, limit) {
+function matchesFilter(event, conversationId, userId) {
+  if (!event) {
+    return false;
+  }
+  if (userId) {
+    return event.user_id === userId;
+  }
+  if (conversationId) {
+    return event.conversation_id === conversationId;
+  }
+  return false;
+}
+
+async function fetchReplayEvents(client, conversationId, userId, limit) {
   const out = [];
   let end = '+';
 
@@ -78,7 +91,7 @@ async function fetchReplayEvents(client, conversationId, limit) {
       if (!parsed || !parsed.event) {
         continue;
       }
-      if (parsed.event.conversation_id === conversationId) {
+      if (matchesFilter(parsed.event, conversationId, userId)) {
         out.push(parsed);
         if (out.length >= limit) {
           break;
@@ -108,8 +121,9 @@ app.get('/health', (req, res) => {
 
 app.get('/events', async (req, res) => {
   const conversationId = `${req.query.conversation_id || ''}`.trim();
-  if (!conversationId) {
-    return res.status(400).json({ detail: 'conversation_id query param is required.' });
+  const userId = `${req.query.user_id || ''}`.trim();
+  if (!conversationId && !userId) {
+    return res.status(400).json({ detail: 'conversation_id or user_id query param is required.' });
   }
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -149,13 +163,15 @@ app.get('/events', async (req, res) => {
     await commandClient.connect();
     await streamClient.connect();
 
-    const replay = await fetchReplayEvents(commandClient, conversationId, REPLAY_LIMIT);
+    const replay = await fetchReplayEvents(commandClient, conversationId, userId, REPLAY_LIMIT);
     for (const item of replay) {
       writeSseEvent(res, 'state', item.event);
     }
 
     writeSseEvent(res, 'ready', {
       conversation_id: conversationId,
+      user_id: userId || null,
+      mode: userId ? 'user' : 'conversation',
       replay_count: replay.length,
       stream_key: STREAM_KEY,
     });
@@ -203,7 +219,7 @@ app.get('/events', async (req, res) => {
           if (!parsed || !parsed.event) {
             continue;
           }
-          if (parsed.event.conversation_id !== conversationId) {
+          if (!matchesFilter(parsed.event, conversationId, userId)) {
             continue;
           }
           writeSseEvent(res, 'state', parsed.event);

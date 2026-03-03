@@ -5,6 +5,7 @@ import uuid
 
 from django.conf import settings
 
+from apps.embedding_service.service import EmbeddingService
 from apps.history_service.models import Turn
 from apps.history_service.service import HistoryService
 from apps.llm_service.service import LLMService
@@ -32,6 +33,7 @@ class TutorResponseHandler:
         self.prompt_service = prompt_service or PromptService()
         self.history_service = history_service or HistoryService()
         self.llm_service = llm_service or LLMService()
+        self.embedding_service = EmbeddingService()
 
     def generate_response(
         self,
@@ -134,7 +136,11 @@ class TutorResponseHandler:
             if baseline_prompt_id is None:
                 raise PromptDataError('BASELINE_PROMPT_ID is required when OBSERVABILITY_MODE is enabled.')
 
-            baseline_prompt = Prompt.objects.filter(id=baseline_prompt_id, is_active=True).first()
+            baseline_prompt = Prompt.objects.filter(
+                id=baseline_prompt_id,
+                is_active=True,
+                owner_user_id__isnull=True,
+            ).first()
             if baseline_prompt is None:
                 raise PromptNotFoundError(f'Baseline prompt {baseline_prompt_id} not found or inactive.')
 
@@ -245,6 +251,14 @@ class TutorResponseHandler:
                 'baseline_status': (baseline_shadow or {}).get('status'),
             },
         )
+
+        try:
+            self.embedding_service.embed_turn(str(turn.id))
+        except Exception:
+            self.embedding_service.enqueue_turn_job(
+                str(turn.id),
+                payload={'reason': 'turn_post_persist'},
+            )
 
         PromptDecision.objects.filter(
             learner_id=user_id,

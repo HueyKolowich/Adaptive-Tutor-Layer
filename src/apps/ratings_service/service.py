@@ -4,86 +4,27 @@ import uuid
 
 from django.db import transaction
 
+from apps.embedding_service.service import EmbeddingService
+from apps.evaluation_service.service import EvaluationService
 from apps.history_service.models import Turn
-from apps.ratings_service.models import Evaluator, TurnEvaluation, TurnFeedback
+from apps.ratings_service.models import TurnEvaluation, TurnFeedback
 from common.errors import PersistenceError
 from common.observability import publish_state_event
 from apps.prompt_service.service import PromptService
 
 
 class QScoreService:
-    DEFAULT_EVALUATOR_NAME = 'qscore_v0'
-    DEFAULT_EVALUATOR_VERSION = '0.1.0'
-
     def __init__(self, evaluator_name: str | None = None):
-        self.evaluator_name = evaluator_name or self.DEFAULT_EVALUATOR_NAME
+        self.evaluation_service = EvaluationService(evaluator_name=evaluator_name)
 
     def evaluate_turn(self, turn: Turn) -> TurnEvaluation | None:
-        evaluator = (
-            Evaluator.objects.filter(name=self.evaluator_name)
-            .order_by('-created_at')
-            .first()
-        )
-        if not evaluator:
-            return None
-
-        config = evaluator.config_json or {}
-        rating_scale = config.get('rating_scale', {'min': 1, 'max': 5})
-        weights = config.get('weights', {'wc': 0.4, 'wh': 0.4, 'wp': 0.2})
-
-        latest_feedback = (
-            turn.feedback_entries.order_by('-created_at').first()
-        )
-        if not latest_feedback:
-            return None
-
-        c = self._normalize(latest_feedback.rating_correctness, rating_scale)
-        h = self._normalize(latest_feedback.rating_helpfulness, rating_scale)
-        p = self._pedagogy_score(turn, config)
-
-        q_total = (
-            weights.get('wc', 0.0) * c
-            + weights.get('wh', 0.0) * h
-            + weights.get('wp', 0.0) * p
-        )
-
-        evaluation, _ = TurnEvaluation.objects.update_or_create(
-            turn=turn,
-            evaluator=evaluator,
-            defaults={
-                'q_total': q_total,
-                'q_correctness': c,
-                'q_helpfulness': h,
-                'q_pedagogy': p,
-            },
-        )
-        return evaluation
-
-    def _normalize(self, rating: int, rating_scale: dict) -> float:
-        min_r = float(rating_scale.get('min', 1))
-        max_r = float(rating_scale.get('max', 5))
-        if max_r <= min_r:
-            return 0.0
-        normalized = (float(rating) - min_r) / (max_r - min_r)
-        return max(0.0, min(1.0, normalized))
-
-    def _pedagogy_score(self, turn: Turn, config: dict) -> float:
-        guardrail_key = config.get('guardrail_tag', 'guardrails')
-        prompt = getattr(turn, 'prompt', None)
-        if not prompt:
-            return 0.0
-        tags = prompt.policy_tags_json or {}
-        guardrails = tags.get(guardrail_key)
-        if isinstance(guardrails, (list, tuple, dict)) and len(guardrails) > 0:
-            return 1.0
-        if isinstance(guardrails, str) and guardrails.strip():
-            return 1.0
-        return 0.0
+        return self.evaluation_service.evaluate_turn(turn)
 
 
 class RatingsService:
     def __init__(self, qscore_service: QScoreService | None = None):
         self.qscore_service = qscore_service or QScoreService()
+        self.embedding_service = EmbeddingService()
 
     @transaction.atomic
     def record_feedback_and_evaluate(
@@ -119,6 +60,13 @@ class RatingsService:
             rating_clarity=rating_clarity,
             free_text=free_text,
         )
+        try:
+            self.embedding_service.embed_feedback(str(feedback.id))
+        except Exception:
+            self.embedding_service.enqueue_feedback_job(
+                str(feedback.id),
+                payload={'reason': 'feedback_post_persist'},
+            )
 
         publish_state_event(
             event_type='feedback.recorded',

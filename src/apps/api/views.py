@@ -13,6 +13,10 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.drift_detection_service.models import DriftSignal
+from apps.drift_detection_service.service import DriftDetectionService
+from apps.ga_service.service import GAService
+from apps.prompt_service.models import Prompt
 from apps.handler.service import TutorResponseHandler
 from apps.ratings_service.service import RatingsService
 from common.errors import (
@@ -166,12 +170,14 @@ class TurnFeedbackView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        user_id = data['user_id']
+
         trace_id = str(uuid.uuid4())
         ratings_service = RatingsService()
         try:
             feedback, evaluation = ratings_service.record_feedback_and_evaluate(
                 turn_id=turn_id,
-                user_id=data['user_id'],
+                user_id=user_id,
                 rating_correctness=data['rating_correctness'],
                 rating_helpfulness=data['rating_helpfulness'],
                 rating_clarity=data['rating_clarity'],
@@ -181,7 +187,7 @@ class TurnFeedbackView(APIView):
         except PersistenceError as exc:
             self._emit_feedback_error(
                 turn_id=turn_id,
-                user_id=data['user_id'],
+                user_id=user_id,
                 trace_id=trace_id,
                 stage='feedback_persistence',
                 exc=exc,
@@ -190,7 +196,7 @@ class TurnFeedbackView(APIView):
         except Exception as exc:  # safeguard
             self._emit_feedback_error(
                 turn_id=turn_id,
-                user_id=data['user_id'],
+                user_id=user_id,
                 trace_id=trace_id,
                 stage='feedback_unknown',
                 exc=exc,
@@ -310,6 +316,146 @@ class ConversationListView(APIView):
             })
 
         return Response({'conversations': result}, status=status.HTTP_200_OK)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class DriftRunView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        user_id = (request.data.get('user_id') or '').strip()
+        if not user_id:
+            return Response({'detail': 'user_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        run = DriftDetectionService().run_cycle_for_user(user_id=user_id)
+        return Response(
+            {
+                'drift_run_id': run.id,
+                'status': run.status,
+                'ga_triggered': run.ga_triggered,
+                'metrics': run.metrics_json,
+                'requested_by': 'dev',
+                'user_id': user_id,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class DriftSignalListView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request):
+        user_id = (request.query_params.get('user_id') or '').strip()
+        if not user_id:
+            return Response({'detail': 'user_id query param required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        rows = (
+            DriftSignal.objects.select_related('drift_run')
+            .filter(subject_user_id=user_id)
+            .order_by('-detected_at')[:100]
+        )
+        result = [
+            {
+                'id': row.id,
+                'drift_run_id': row.drift_run_id,
+                'subject_user_id': row.subject_user_id,
+                'signal_type': row.signal_type,
+                'severity': row.severity,
+                'score': row.score,
+                'threshold': row.threshold,
+                'scope': row.scope,
+                'detected_at': row.detected_at.isoformat(),
+                'metadata': row.metadata_json,
+            }
+            for row in rows
+        ]
+        return Response({'signals': result}, status=status.HTTP_200_OK)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class GAEvolveView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        user_id = (request.data.get('user_id') or '').strip()
+        if not user_id:
+            return Response({'detail': 'user_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        parent_prompt_id = request.data.get('parent_prompt_id')
+        parent_prompt_id_val = int(parent_prompt_id) if parent_prompt_id is not None else None
+
+        k = int(request.data.get('k', 3))
+        drift_signal_id = request.data.get('drift_signal_id')
+        rows = GAService().generate_variants(
+            parent_prompt_id=parent_prompt_id_val,
+            subject_user_id=user_id,
+            drift_signal_id=int(drift_signal_id) if drift_signal_id is not None else None,
+            k=k,
+        )
+        return Response(
+            {
+                'user_id': user_id,
+                'generated': len(rows),
+                'candidate_prompt_ids': [row.prompt_id for row in rows if row.prompt_id],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class PromptLifecycleView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request, prompt_id, action):
+        user_id = (request.data.get('user_id') or '').strip()
+        if not user_id:
+            return Response({'detail': 'user_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        prompt = Prompt.objects.filter(id=prompt_id).first()
+        if prompt is None:
+            return Response({'detail': 'prompt not found.'}, status=status.HTTP_404_NOT_FOUND)
+        if prompt.owner_user_id and prompt.owner_user_id != user_id:
+            return Response({'detail': 'prompt owner mismatch.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if action == 'promote':
+            prompt.status = 'active'
+            prompt.rollout_pct = 1.0
+            prompt.is_active = True
+            prompt.save(update_fields=['status', 'rollout_pct', 'is_active'])
+            publish_state_event(
+                event_type='ga.prompt_promoted',
+                conversation_id=f'user:{user_id}',
+                user_id=user_id,
+                trace_id=str(uuid.uuid4()),
+                node='ga',
+                edge={'from': 'ga', 'to': 'policies'},
+                payload={
+                    'prompt_id': prompt.id,
+                    'subject_user_id': prompt.owner_user_id or user_id,
+                    'status': prompt.status,
+                },
+            )
+        elif action == 'retire':
+            prompt.status = 'retired'
+            prompt.is_active = False
+            prompt.save(update_fields=['status', 'is_active'])
+        else:
+            return Response({'detail': 'unsupported action.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {
+                'prompt_id': prompt.id,
+                'status': prompt.status,
+                'is_active': prompt.is_active,
+                'owner_user_id': prompt.owner_user_id,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 @login_required

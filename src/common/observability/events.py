@@ -18,6 +18,11 @@ STATE_EVENT_TYPES = (
     'qscore.evaluated',
     'bandit.reward_applied',
     'bandit.arm_state_updated',
+    'drift.run_completed',
+    'drift.signal_detected',
+    'drift.ga_triggered',
+    'ga.variants_generated',
+    'ga.prompt_promoted',
     'pipeline.error',
 )
 

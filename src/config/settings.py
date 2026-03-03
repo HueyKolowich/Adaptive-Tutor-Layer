@@ -45,6 +45,10 @@ INSTALLED_APPS = [
     'apps.prompt_service',
     'apps.history_service',
     'apps.ratings_service',
+    'apps.embedding_service',
+    'apps.drift_detection_service',
+    'apps.ga_service',
+    'apps.evaluation_service',
     'apps.accounts',
 ]
 
@@ -82,13 +86,12 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 
-# Database
-# https://docs.djangoproject.com/en/6.0/ref/settings/#databases
+SQLITE_DB_PATH = os.getenv('SQLITE_DB_PATH', str(BASE_DIR / 'db.sqlite3'))
 
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': SQLITE_DB_PATH,
     }
 }
 
@@ -152,6 +155,10 @@ OBS_REDIS_URL = os.getenv('OBS_REDIS_URL', 'redis://localhost:6379/0')
 OBS_REDIS_STREAM_KEY = os.getenv('OBS_REDIS_STREAM_KEY', 'atl:state-events')
 OBS_REDIS_MAXLEN = int(os.getenv('OBS_REDIS_MAXLEN', '2000'))
 NINJA_PANEL_URL = os.getenv('NINJA_PANEL_URL', 'http://localhost:3001')
+CHROMA_HOST = os.getenv('CHROMA_HOST', 'chromadb')
+CHROMA_PORT = int(os.getenv('CHROMA_PORT', '8000'))
+CHROMA_COLLECTION_TURNS = os.getenv('CHROMA_COLLECTION_TURNS', 'atl_turns')
+EMBEDDING_MODEL_VERSION = os.getenv('EMBEDDING_MODEL_VERSION', 'hash_v1')
 
 _baseline_prompt_id_raw = os.getenv('BASELINE_PROMPT_ID', '').strip()
 BASELINE_PROMPT_ID = int(_baseline_prompt_id_raw) if _baseline_prompt_id_raw else None

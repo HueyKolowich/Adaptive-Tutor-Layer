@@ -9,9 +9,9 @@ from apps.prompt_service.models import (
 
 @admin.register(Prompt)
 class PromptAdmin(admin.ModelAdmin):
-    list_display = ('id', 'is_active', 'created_at')
-    list_filter = ('is_active',)
-    search_fields = ('text',)
+    list_display = ('id', 'status', 'origin', 'owner_user_id', 'rollout_pct', 'is_active', 'created_at')
+    list_filter = ('status', 'origin', 'is_active')
+    search_fields = ('text', 'owner_user_id')
 
 
 @admin.register(PromptDecision)

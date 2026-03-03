@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 
 import numpy as np
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.history_service.models import Turn
@@ -106,11 +108,17 @@ class PromptService:
         if context.conversation_id is None:
             raise PromptDataError("conversation_id required for bandit selection")
 
-        eligible = list(Prompt.objects.filter(is_active=True).order_by('-created_at', '-id'))
+        eligible = self._eligible_prompts(context)
         if not eligible:
             raise PromptNotFoundError("No active prompts found.")
 
-        fallback_prompt = eligible[0]
+        fallback_prompt = (
+            self._visible_prompt_queryset(context)
+            .filter(status='active')
+            .order_by('-created_at', '-id')
+            .first()
+            or eligible[0]
+        )
         last_turn = (
             Turn.objects.filter(conversation_id=context.conversation_id)
             .order_by('-turn_index')
@@ -175,6 +183,45 @@ class PromptService:
                 candidates=candidates,
             ),
         )
+
+    def _eligible_prompts(self, context: PromptContext) -> list[Prompt]:
+        prompts = list(
+            self._visible_prompt_queryset(context)
+            .exclude(status='retired')
+            .order_by('-created_at', '-id')
+        )
+        if not prompts:
+            return []
+
+        out = []
+        for prompt in prompts:
+            if prompt.status == 'active':
+                out.append(prompt)
+                continue
+            if prompt.status != 'candidate':
+                continue
+            rollout_pct = max(0.0, min(1.0, float(prompt.rollout_pct)))
+            if rollout_pct <= 0.0:
+                continue
+            if self._candidate_rollout_hit(context, prompt.id, rollout_pct):
+                out.append(prompt)
+
+        if out:
+            return out
+        return [p for p in prompts if p.status == 'active'] or prompts[:1]
+
+    def _visible_prompt_queryset(self, context: PromptContext):
+        return Prompt.objects.filter(
+            is_active=True,
+        ).filter(
+            Q(owner_user_id__isnull=True) | Q(owner_user_id=context.user_id),
+        )
+
+    def _candidate_rollout_hit(self, context: PromptContext, prompt_id: int, rollout_pct: float) -> bool:
+        key = f"{context.user_id}:{context.conversation_id}:{prompt_id}".encode('utf-8')
+        digest = hashlib.sha256(key).hexdigest()
+        normalized = int(digest[:8], 16) / 0xFFFFFFFF
+        return normalized < rollout_pct
 
     def _streak_guardrails(self, conversation_id: str, prompt_id: int) -> bool:
         recent = list(

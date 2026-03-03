@@ -2,10 +2,25 @@ from django.db import models
 
 
 class Prompt(models.Model):
+    ORIGIN_CHOICES = (
+        ('manual', 'manual'),
+        ('ga', 'ga'),
+    )
+    STATUS_CHOICES = (
+        ('active', 'active'),
+        ('candidate', 'candidate'),
+        ('retired', 'retired'),
+    )
+
     text = models.TextField()
     is_active = models.BooleanField(default=True)
+    origin = models.CharField(max_length=16, choices=ORIGIN_CHOICES, default='manual')
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='active', db_index=True)
+    rollout_pct = models.FloatField(default=1.0)
+    owner_user_id = models.CharField(max_length=128, null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     policy_tags_json = models.JSONField(default=dict)
+    lineage_metadata_json = models.JSONField(default=dict)
     parent_prompt = models.ForeignKey(
         'self',
         null=True,
@@ -16,6 +31,9 @@ class Prompt(models.Model):
 
     class Meta:
         ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=('is_active', 'status', 'owner_user_id')),
+        ]
 
     def __str__(self):
         return f"Prompt(active={self.is_active})"

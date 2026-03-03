@@ -3,14 +3,47 @@ services:
     image: redis:7-alpine
     ports:
       - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  chromadb:
+    image: chromadb/chroma:0.5.5
+    ports:
+      - '8001:8000'
+    environment:
+      IS_PERSISTENT: 'TRUE'
+      PERSIST_DIRECTORY: '/chroma/chroma'
+    volumes:
+      - chroma_data:/chroma/chroma
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/heartbeat', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
 
   api:
     build: .
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
     ports:
       - '8000:8000'
     environment:
+      SQLITE_DB_PATH: '/app/src/db.sqlite3'
+      CHROMA_HOST: 'chromadb'
+      CHROMA_PORT: '8000'
+      CHROMA_COLLECTION_TURNS: 'atl_turns'
       OBSERVABILITY_MODE: 'true'
       OBS_EVENTS_STRICT: 'true'
       OBS_REDIS_URL: 'redis://redis:6379/0'
@@ -31,10 +64,35 @@ services:
     build:
       context: ./panel-service
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     ports:
       - '3001:3001'
     environment:
       OBS_REDIS_URL: 'redis://redis:6379/0'
       OBS_REDIS_STREAM_KEY: 'atl:state-events'
       PANEL_REPLAY_LIMIT: '100'
+
+  drift-worker:
+    build: .
+    command: python src/manage.py run_drift_cycle --loop --interval 300
+    depends_on:
+      redis:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    environment:
+      SQLITE_DB_PATH: '/app/src/db.sqlite3'
+      CHROMA_HOST: 'chromadb'
+      CHROMA_PORT: '8000'
+      CHROMA_COLLECTION_TURNS: 'atl_turns'
+      OBSERVABILITY_MODE: 'true'
+      OBS_EVENTS_STRICT: 'true'
+      OBS_REDIS_URL: 'redis://redis:6379/0'
+      OBS_REDIS_STREAM_KEY: 'atl:state-events'
+      OBS_REDIS_MAXLEN: '2000'
+    volumes:
+      - ./src/db.sqlite3:/app/src/db.sqlite3
+
+volumes:
+  chroma_data:

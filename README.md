@@ -1,155 +1,138 @@
 # Adaptive Tutor Layer (Django API)
 
-Minimal Django backend for the V0 tutoring flow.
+Adaptive Tutor backend with modular services for prompt optimization, feedback-driven evaluation, embedding sync, drift detection, and GA prompt evolution.
 
-## Feedback Requirement
-- Users must submit feedback for the previous tutor response before sending the next question.
-- Respond endpoint returns HTTP 409 with `code: feedback_required` when feedback is missing, including `last_turn_id` and `last_turn_index`.
-- The sample app UI includes a Feedback tab/panel and shows an alert when blocked.
+## Services Implemented
 
-## Local dev (venv)
+- `handler`: request orchestration
+- `prompt_service`: contextual bandit prompt selection + reward updates
+- `history_service`: turn persistence
+- `llm_service`: upstream model wrapper
+- `ratings_service`: feedback ingestion and reward orchestration
+- `evaluation_service`: Q-score computation/persistence
+- `embedding_service`: turn/feedback embedding sync + retry queue
+- `drift_detection_service`: periodic drift analysis and GA trigger policy
+- `ga_service`: prompt variant generation/publish workflow
+
+## Local Dev (venv)
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python src/manage.py makemigrations
 .venv/bin/python src/manage.py migrate
 .venv/bin/python src/manage.py runserver
 ```
 
-Create an admin user:
+## Environment Variables
+
+Core:
+
+- `SQLITE_DB_PATH` (optional, defaults to `src/db.sqlite3`)
+- `LLM_API_URL`, `LLM_API_KEY`, `LLM_TIMEOUT_SECONDS`
+- `LLM_DEFAULT_MODEL`, `LLM_DEFAULT_TEMPERATURE`, `LLM_DEFAULT_MAX_TOKENS`
+
+Observability:
+
+- `OBSERVABILITY_MODE`, `OBS_EVENTS_STRICT`
+- `OBS_REDIS_URL`, `OBS_REDIS_STREAM_KEY`, `OBS_REDIS_MAXLEN`
+- `NINJA_PANEL_URL`, `BASELINE_PROMPT_ID`
+
+Embeddings/Drift:
+
+- `CHROMA_HOST`, `CHROMA_PORT`, `CHROMA_COLLECTION_TURNS`
+- `EMBEDDING_MODEL_VERSION`
+
+## Docker Compose (API + SQLite + Chroma + Redis + Panel + Drift Worker)
 
 ```bash
-.venv/bin/python src/manage.py createsuperuser
+docker compose up --build -d
 ```
 
-Add an active prompt (via the admin UI) by going to:
-
-- http://127.0.0.1:8000/admin/
-
-Simple UI (no build tools):
-
-- http://127.0.0.1:8000/app/
-
-Legacy panel route now redirects to the standalone Ninja panel service:
-
-- http://127.0.0.1:8000/panel/?conversation_id=<uuid>
-
-## Docker (SQLite persistence)
-
-Build the image:
+You can still view logs in daemon mode:
 
 ```bash
-docker build -t adaptive-tutor-api .
+# all services
+docker compose logs -f
+
+# one service
+docker compose logs -f api
+docker compose logs -f drift-worker
+docker compose logs -f chromadb
 ```
 
-Run with a bind mount so `db.sqlite3` persists on your host:
+Useful lifecycle commands:
 
 ```bash
-docker run -p 8000:8000 \
-  -v "$(pwd)/src/db.sqlite3:/app/src/db.sqlite3" \
-  -e LLM_API_URL="https://api.x.ai/v1/chat/completions" \
-  -e LLM_API_KEY="your-key-here" \
-  -e LLM_TIMEOUT_SECONDS="15" \
-  -e LLM_DEFAULT_MODEL="grok-4-1-fast-non-reasoning" \
-  -e LLM_DEFAULT_TEMPERATURE="0.7" \
-  -e LLM_DEFAULT_MAX_TOKENS="512" \
-  adaptive-tutor-api
-```
+# stop services (keep containers)
+docker compose stop
 
-Note: The Docker image runs `python src/manage.py migrate --noinput` automatically on startup.
-
-## Docker Compose (API + Redis + Ninja Panel)
-
-Start the full real-time observability stack:
-
-```bash
-docker compose up --build
+# stop + remove containers/network (keep volumes)
+docker compose down
 ```
 
 Services:
 
 - API: http://127.0.0.1:8000
-- Ninja Panel: http://127.0.0.1:3001/?conversation_id=<uuid>
+- Panel: http://127.0.0.1:3001/?conversation_id=<uuid>
+- SQLite DB file: `src/db.sqlite3` (bind-mounted into API and drift worker)
+- ChromaDB: `localhost:8001` (persisted via Docker volume `chroma_data`)
 - Redis: `localhost:6379`
+- Drift worker: background loop every 300s
 
-The compose file defaults to:
+## Documentation
 
-- `OBSERVABILITY_MODE=true`
-- `OBS_EVENTS_STRICT=true`
-- `OBS_REDIS_URL=redis://redis:6379/0`
-- `OBS_REDIS_STREAM_KEY=atl:state-events`
-- `NINJA_PANEL_URL=http://localhost:3001`
-- `BASELINE_PROMPT_ID=1` (set this to an existing active prompt id in your DB)
+- Service docs index: `docs/services/service-index.md`
+- System interaction overview: `docs/architecture/adaptive-tutor-layer-overview.md`
 
-## API
+## Cleanup Helpers
+
+Reset runtime data while preserving default prompts and current users:
+
+```bash
+./scripts/clean_dev_db.py
+```
+
+Useful options:
+
+- Dry run: `./scripts/clean_dev_db.py --dry-run`
+- Also delete users: `./scripts/clean_dev_db.py --drop-users`
+- Keep specific prompts: `./scripts/clean_dev_db.py --keep-prompt-id 1 --keep-prompt-id 2`
+- Keep all prompts: `./scripts/clean_dev_db.py --keep-all-prompts`
+- Skip Chroma cleanup: `./scripts/clean_dev_db.py --no-chroma-clean`
+- Target a specific Chroma URL: `./scripts/clean_dev_db.py --chroma-url http://localhost:8001`
+
+## Tutor API (Dev Mode, No Auth)
 
 `POST /api/tutor/respond`
-
-```json
-{
-  "user_id": "user-123",
-  "conversation_id": "optional-uuid",
-  "question_text": "What is photosynthesis?"
-}
-```
-
-Successful response (200):
-
-```json
-{
-  "conversation_id": "uuid",
-  "turn_id": "uuid",
-  "turn_index": 0,
-  "tutor_response": "..."
-}
-```
-
-Feedback required (409):
-
-```json
-{
-  "detail": "Feedback required before next turn.",
-  "code": "feedback_required",
-  "last_turn_id": "uuid",
-  "last_turn_index": 0
-}
-```
-
-`POST /api/turns/<turn_id>/feedback`
 
 Body:
 
 ```json
 {
-  "user_id": "user-123",
-  "rating_correctness": 5,
-  "rating_helpfulness": 4,
-  "rating_clarity": 4,
-  "free_text": "optional"
+  "user_id": "learner-1",
+  "conversation_id": "optional-uuid",
+  "question_text": "What is photosynthesis?"
 }
 ```
 
-### Quick Test (cURL)
+## Internal API
+
+- `POST /api/internal/drift/run`
+- `GET /api/internal/drift/signals`
+- `POST /api/internal/ga/evolve`
+- `POST /api/internal/prompts/<id>/promote`
+- `POST /api/internal/prompts/<id>/retire`
+
+## Drift Worker
+
+Run one cycle:
 
 ```bash
-# First turn (allowed)
-curl -sS -X POST http://localhost:8000/api/tutor/respond \
-  -H 'Content-Type: application/json' \
-  -d '{"user_id":"user-123","question_text":"What is backpropagation?"}'
+.venv/bin/python src/manage.py run_drift_cycle
+```
 
-# Second turn without feedback (blocked)
-curl -sS -X POST http://localhost:8000/api/tutor/respond \
-  -H 'Content-Type: application/json' \
-  -d '{"user_id":"user-123","conversation_id":"<copy from first>","question_text":"Explain gradients"}'
+Run loop:
 
-# Submit feedback
-curl -sS -X POST http://localhost:8000/api/turns/<last_turn_id>/feedback \
-  -H 'Content-Type: application/json' \
-  -d '{"user_id":"user-123","rating_correctness":5,"rating_helpfulness":4,"rating_clarity":4,"free_text":"Good explanation."}'
-
-# Next turn (allowed)
-curl -sS -X POST http://localhost:8000/api/tutor/respond \
-  -H 'Content-Type: application/json' \
-  -d '{"user_id":"user-123","conversation_id":"<same>","question_text":"Show an example"}'
+```bash
+.venv/bin/python src/manage.py run_drift_cycle --loop --interval 300
 ```

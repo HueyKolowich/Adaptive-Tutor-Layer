@@ -92,6 +92,26 @@ class PromptServiceSelectionTests(TestCase):
         decision = PromptDecision.objects.latest('id')
         self.assertEqual(decision.prompt_id, fallback_prompt.id)
 
+    def test_selection_hides_other_users_private_prompts(self):
+        global_prompt = Prompt.objects.create(text='Global prompt', is_active=True, status='active')
+        Prompt.objects.create(
+            text='Private to learner-2',
+            is_active=True,
+            status='active',
+            owner_user_id='learner-2',
+            origin='ga',
+        )
+        service = PromptService()
+        conversation_id = str(uuid.uuid4())
+
+        result = service.select_system_prompt_with_trace(
+            PromptContext(user_id='learner-1', conversation_id=conversation_id)
+        )
+
+        self.assertEqual(result.system_prompt.prompt_id, global_prompt.id)
+        self.assertEqual(len(result.trace.candidates), 1)
+        self.assertEqual(result.trace.candidates[0].prompt_id, global_prompt.id)
+
 
 class PromptServiceUpdateTests(TestCase):
     def test_per_learner_states_are_isolated(self):
