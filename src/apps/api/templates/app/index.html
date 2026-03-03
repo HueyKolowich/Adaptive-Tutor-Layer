@@ -63,6 +63,10 @@
         background: rgba(13, 13, 21, 0.6); color: #e6dfd8;
       }
       .settings-bar input:focus { outline: none; border-color: #8a2be2; }
+      .settings-bar input[readonly] {
+        cursor: default; opacity: 0.8;
+        user-select: all; -webkit-user-select: all;
+      }
       .new-chat-btn {
         margin-left: auto; padding: 5px 12px; font-size: 13px;
         border-radius: 5px; border: 1px solid #8a2be2;
@@ -359,9 +363,9 @@
     <!-- Settings bar -->
     <div class="settings-bar">
       <label for="user-id">User ID</label>
-      <input id="user-id" value="user-123" />
+      <input id="user-id" value="{{ user_id }}" readonly title="Your unique user ID (read-only)" />
       <label for="conversation-id">Conversation</label>
-      <input id="conversation-id" placeholder="auto-assigned" />
+      <input id="conversation-id" placeholder="auto-assigned" readonly title="Conversation ID (read-only)" />
       <button class="new-chat-btn" id="new-chat-btn" type="button">+ New Chat</button>
     </div>
 
@@ -714,25 +718,6 @@
         questionInput.focus();
       });
 
-      /* ── load history when conversation id changes ── */
-      convIdInput.addEventListener("change", async () => {
-        const cid = convIdInput.value.trim();
-        const uid = userIdInput.value.trim();
-        if (!cid || !uid) return;
-        chatMessages.innerHTML = "";
-        try {
-          const resp = await fetch(`/api/conversations/${cid}/history?user_id=${encodeURIComponent(uid)}`);
-          if (!resp.ok) return;
-          const payload = await resp.json();
-          if (payload.turns && payload.turns.length) {
-            for (const t of payload.turns) {
-              addMessage("user", t.user_text);
-              addMessage("assistant", t.assistant_text, t.turn_id, t.turn_index, t.has_feedback);
-            }
-          }
-        } catch (e) { console.warn("Could not load history:", e); }
-      });
-
       /* ── sidebar toggle ── */
       sidebarCollapse.addEventListener("click", () => {
         sidebar.classList.add("collapsed");
@@ -811,8 +796,7 @@
       // We patch via an event-driven approach instead:
       // (already wired inline – see the fetch success path)
 
-      // Load conversations on page load and when user_id changes
-      userIdInput.addEventListener("change", loadConversationList);
+      // Load conversations on page load
       loadConversationList();
 
       /* ── feedback modal ── */
