@@ -83,6 +83,27 @@ Services:
 
 - Service docs index: `docs/services/service-index.md`
 - System interaction overview: `docs/architecture/adaptive-tutor-layer-overview.md`
+- Simulation harness guide: `docs/simulation-harness.md`
+
+## Simulation Harness Demo
+
+Run a local LLM-driven student simulator against the real API loop for demos:
+
+```bash
+.venv/bin/python scripts/run_student_sim_demo.py \
+  --api-base http://127.0.0.1:8000 \
+  --student-llm-url http://127.0.0.1:11434/v1/chat/completions \
+  --student-model llama3.1:8b-instruct \
+  --user-id demo-learner-01 \
+  --persona socratic_novice \
+  --turns 30 \
+  --seed 42 \
+  --temperature 0.2
+```
+
+Supported personas are defined in `scripts/student_profiles.json`.
+Once the first turn is created, the harness prints a panel URL:
+`http://127.0.0.1:3001/?conversation_id=<uuid>`.
 
 ## Cleanup Helpers
 
